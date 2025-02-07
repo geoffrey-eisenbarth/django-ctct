@@ -18,12 +18,13 @@ for value in [
   'CTCT_FROM_NAME',
   'CTCT_FROM_EMAIL',
   'CTCT_POST_MODEL',
-  # 'CTCT_REPLY_TO_EMAIL'  # Optional, defaults to CTCT_FROM_EMAIL
-  'AUTH_USER_MODEL',
   'ADMINS',
 ]:
   if not hasattr(settings, value):
-    raise ImproperlyConfigured(f"{value} must be defined in settings.py")
+    message = (
+      f"[django-ctct] {value} must be defined in settings.py"
+    )
+    raise ImproperlyConfigured(message)
 
 
 def auth(request: HttpRequest) -> HttpResponse:
@@ -36,11 +37,11 @@ def auth(request: HttpRequest) -> HttpResponse:
 
   """
 
-  auth_code = request.GET.get('code')
+  base_url = 'https://authz.constantcontact.com/oauth2/default/v1'
 
-  if auth_code:
+  if auth_code := request.GET.get('code'):
     response = requests.post(
-      url='https://authz.constantcontact.com/oauth2/default/v1/token',
+      url=f'{base_url}/token',
       auth=(settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY),
       data={
         'code': auth_code,
@@ -48,6 +49,7 @@ def auth(request: HttpRequest) -> HttpResponse:
         'grant_type': 'authorization_code',
       },
     ).json()
+
     if 'refresh_token' in response:
       token = Token(
         access_code=response['access_token'],
@@ -66,7 +68,7 @@ def auth(request: HttpRequest) -> HttpResponse:
 
   else:
     # An admin must provide CTCT access manually
-    endpoint = 'https://authz.constantcontact.com/oauth2/default/v1/authorize'
+    endpoint = f'{base_url}/authorize'
     data = {
       'client_id': settings.CTCT_PUBLIC_KEY,
       'redirect_uri': settings.CTCT_REDIRECT_URI,

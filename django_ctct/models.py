@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
+import uuid
 import warnings
 
 from bs4 import BeautifulSoup
@@ -12,15 +14,13 @@ from requests.models import Response
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import RegexValidator, validate_email
+from django.core.validators import validate_email
 from django.db import models
-from django.db.models import Q
 from django.db.models.query import QuerySet
 from django.db.models.signals import m2m_changed, pre_delete
 from django.dispatch import receiver
 from django.template.loader import render_to_string
 from django.utils import timezone
-from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 
 from django_hosts.resolvers import reverse
@@ -30,8 +30,6 @@ from django_ctct.tasks import (
   ctct_save_job, ctct_delete_job,
   ctct_update_lists_job, ctct_add_list_memberships_job,
 )
-from systems.metrics.models import Region
-from www.posts.models import Post
 
 
 class CTCTModel(models.Model):
@@ -61,6 +59,7 @@ class CTCTModel(models.Model):
       ctct_obj = self.ctct_update()
     return ctct_obj
 
+  # TODO: Implement stripe False | 'sync' | 'async' method
   def save(
     self,
     save_to_ctct: bool = True,
@@ -77,7 +76,7 @@ class CTCTModel(models.Model):
 
     """
 
-    # Save to database first (and set PK)
+    # Save to database first (and set pk)
     super().save(*args, **kwargs)
 
     # Save on CTCT's servers
@@ -237,17 +236,22 @@ class Token(models.Model):
 
   """
 
-  access_code = models.TextField()
+  access_code = models.TextField(
+    verbose_name=_('Access Code'),
+  )
   refresh_code = models.CharField(
     max_length=50,
+    verbose_name=_('Refresh Code'),
   )
   type = models.CharField(
     max_length=50,
     default='Bearer',
+    verbose_name=_('Type'),
   )
   inserted = models.DateTimeField(
     auto_now=False,
     auto_now_add=True,
+    verbose_name=_('Inserted'),
   )
 
   class Meta:
@@ -260,6 +264,7 @@ class Token(models.Model):
 
   def decode(self) -> dict:
     """Decode JWT Token, which also verifies that it hasn't expired."""
+
     client = jwt.PyJWKClient(
       'https://identity.constantcontact.com/'
       'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
@@ -363,20 +368,25 @@ class ContactList(CTCTModel):
 
   name = models.CharField(
     max_length=255,
+    verbose_name=_('Name'),
   )
   description = models.CharField(
     max_length=255,
+    verbose_name=_('Description'),
     help_text=_('For internal use only'),
   )
   favorite = models.BooleanField(
     default=False,
+    verbose_name=_('Favorite'),
     help_text=_('Mark the list as a favorite'),
   )
   created_at = models.DateTimeField(
     auto_now_add=True,
+    verbose_name=_('Created At'),
   )
   updated_at = models.DateTimeField(
     auto_now=True,
+    verbose_name=_('Updated At'),
   )
 
   class Meta:
@@ -452,150 +462,104 @@ class Contact(CTCTModel):
     ('Prof.', 'Professor'),
   )
   SOURCES = (
-    ('tpg', 'Office'),
-    ('www', 'Website'),
+    ('Contact', 'Contact'),
+    ('Account', 'Account'),
+  )
+  CUSTOM_FIELD_NAMES = (
+    'honorific',
+    'suffix',
   )
 
   email = models.EmailField(
-    _('Email Address'),
     blank=True,         # Allow new entries without email :(
     null=True,          # TPG office has Contacts without emails
     unique=True,        # Note: None != None for uniqueness check
+    verbose_name=_('Email Address'),
+  )
+  first_name = models.CharField(
+    max_length=50,
+    blank=True,
+    verbose_name=_('First Name'),
+    help_text=_('The first name of the contact'),
+  )
+  last_name = models.CharField(
+    max_length=50,
+    blank=True,
+    verbose_name=_('Last Name'),
+    help_text=_('The last name of the contact'),
+  )
+  job_title = models.CharField(
+    max_length=50,
+    blank=True,
+    verbose_name=_('Job Title'),
+    help_text=_('The job title of the contact'),
+  )
+  company_name = models.CharField(
+    max_length=50,
+    blank=True,
+    verbose_name=_('Company Name'),
+    help_text=_('The name of the company where the contact works'),
   )
   honorific = models.CharField(
     choices=SALUTATIONS,
     max_length=5,
     blank=True,
-  )
-  first_name = models.CharField(
-    _('First Name'),
-    max_length=255,
-    blank=True,
-  )
-  last_name = models.CharField(
-    _('Last Name'),
-    max_length=255,
-    blank=True,
+    verbose_name=_('Honorific'),
+    help_text=_('The honorific of the contact'),
   )
   suffix = models.CharField(
     max_length=10,
     blank=True,
+    verbose_name=_('Suffix'),
+    help_text=_('The suffix of the contact'),
   )
-  job_title = models.CharField(
-    _('Job Title'),
-    max_length=50,  # Limit set by CTCT
-    blank=True,
-  )
-  company = models.CharField(
-    _('Company'),
-    max_length=255,
-    blank=True,
-  )
-  county = models.ForeignKey(
-    Region,
-    limit_choices_to={'category': 'COUNTY'},
-    on_delete=models.SET_NULL,
-    null=True,
-    blank=True,
-    help_text=_(
-      'Select and type to filter options'
-    ),
-    related_name='county_contacts',
-  )
-  address = models.CharField(
-    max_length=255,
-    blank=True,
-  )
-  address_2 = models.CharField(
-    max_length=255,
-    blank=True,
-  )
-  city = models.CharField(
-    max_length=255,
-    blank=True,
-  )
-  state = models.ForeignKey(
-    Region,
-    limit_choices_to={'category': 'STATE'},
-    on_delete=models.SET_NULL,
-    null=True,
-    related_name='state_contacts',
-  )
-  zip_code = models.CharField(
-    max_length=10,
-    blank=True,
-    verbose_name=_("ZIP Code"),
-    validators=[RegexValidator(
-      regex=r'(^\d{5}$)|(^\d{9}$)|(^\d{5}-\d{4}$)',
-      message=_("ZIP Coode must be 5 or 9 digits"),
-    )],
-  )
-  home_phone = PhoneNumberField(
-    verbose_name=_("Home Phone"),
-    blank=True,
-  )
-  office_phone = PhoneNumberField(
-    verbose_name=_("Office Phone"),
-    blank=True,
-  )
-  direct_phone = PhoneNumberField(
-    verbose_name=_("Direct Phone"),
-    blank=True,
-  )
-  cell_phone = PhoneNumberField(
-    verbose_name=_("Cell Phone"),
-    blank=True,
-  )
-  fax = PhoneNumberField(
-    verbose_name=_("Fax Number"),
-    blank=True,
-  )
-  user = models.OneToOneField(
-    settings.AUTH_USER_MODEL,
-    on_delete=models.CASCADE,
-    null=True,
-    blank=True,
-    related_name='contact',
-  )
-  lists = models.ManyToManyField(
+
+  list_memberships = models.ManyToManyField(
     ContactList,
     related_name='contacts',
-    verbose_name=_('Contact Lists'),
+    verbose_name=_('List Memberships'),
     blank=True,
   )
-  flat_notes = models.TextField(
-    blank=True,
-    help_text=_(
-      "Intended for internal notes, "
-      "not to be displayed publically."
-    ),
+
+  create_source = models.CharField(
+    max_length=7,
+    choices=SOURCES,
+    default='Account',
+    verbose_name=_('Create Source'),
+    help_text=_('Describes who added the contact'),
   )
   created_at = models.DateTimeField(
     auto_now=False,
     default=timezone.now,
     null=True,
+    verbose_name=_('Created At'),
+    help_text=_('Date and time that the resource was created'),
+  )
+  update_source = models.CharField(
+    max_length=7,
+    choices=SOURCES,
+    default='Account',
+    verbose_name=_('Update Source'),
+    help_text=_('Identifies who last updated the contact'),
   )
   updated_at = models.DateTimeField(
     auto_now=True,
     null=True,
+    verbose_name=_('Updated At'),
+    help_text=_('Date and time that the contact was last updated'),
   )
-  source = models.CharField(
-    max_length=3,
-    choices=SOURCES,
-    default='www',
-  )
-  optout = models.BooleanField(
+
+  # TODO: Review opt_out
+  opt_out = models.BooleanField(
     default=False,
     editable=False,
-    verbose_name=_("Opted Out"),
-    help_text=_(
-      "Enforced by ConstantContact."
-    ),
+    verbose_name=_('Opted Out'),
+    help_text=_('Handled by ConstantContact'),
   )
-  optout_at = models.DateTimeField(
+  opt_out_date = models.DateTimeField(
     blank=True,
     null=True,
-    verbose_name=_("Opted Out On"),
+    verbose_name=_('Opted Out On'),
   )
 
   @property
@@ -611,89 +575,21 @@ class Contact(CTCTModel):
 
   @property
   def job(self) -> str:
-    return ' @ '.join(filter(None, [self.job_title, self.company]))
-
-  @property
-  def phone(self) -> str:
-    phone_numbers = [
-      self.direct_phone,
-      self.home_phone,
-      self.office_phone,
-      self.cell_phone,
-    ]
-    try:
-      phone = str(next(filter(lambda x: x, phone_numbers)))
-    except StopIteration:
-      phone = ''
-    return phone
-
-  @cached_property
-  def column(self) -> ContactList:
-    return self.get_list('Column: Website')
-
-  @cached_property
-  def newsletter(self) -> ContactList:
-    lists = [
-      'Newsletter: Paid',
-      'Newsletter: Comps',
-      'Newsletter: Public Officials',
-      'Legislators',
-    ]
-    return self.get_list(lists)
-
-  @cached_property
-  def forecast(self) -> ContactList:
-    lists = ['Forecast: Major Texas Metros', 'Forecast: All Texas Regions']
-    return self.get_list(lists)
-
-  @cached_property
-  def is_public_official(self) -> bool:
-    lists = [
-      'Public Officials',
-      'Legislators',
-    ]
-    return bool(self.get_list(lists))
-
-  @cached_property
-  def is_media(self) -> bool:
-    return self.lists.filter(name__startswith='Media').exists()
-
-  @cached_property
-  def is_newsletter(self) -> bool:
-    return self.lists.filter(name__startswith='Newsletter').exists()
-
-  @cached_property
-  def is_comped(self) -> bool:
-    return bool(self.get_list('Newsletter: Comps'))
-
-  @cached_property
-  def is_column(self) -> bool:
-    return self.lists.filter(name__startswith='Column').exists()
-
-  @cached_property
-  def is_website(self) -> bool:
-    return self.lists.filter(name__contains='Website').exists()
+    return ' @ '.join(filter(None, [self.job_title, self.company_name]))
 
   class Meta:
     verbose_name = _('Contact')
     verbose_name_plural = _('Contacts')
-    ordering = ['email']
+    ordering = ['-updated_at']
 
   def __str__(self) -> str:
     if self.name and self.email:
       s = f'{self.name} ({self.email})'
-    elif self.email:
-      s = self.email
-    elif self.name:
-      s = self.name
-    elif self.company and self.address:
-      s = f'{self.company} ({self.address})'
-    elif self.company:
-      s = self.company
     else:
-      s = 'N/A'
+      s = self.email or self.name or 'N/A'
     return s
 
+  # TODO PUSH: Should this be removed and added to TPG subclass?
   def clean(self) -> None:
     """Allow blank emails, but enforce uniqueness.
 
@@ -714,36 +610,45 @@ class Contact(CTCTModel):
 
     return super().clean()
 
+  # TODO PUSH: Revisit this
   def save(self, *args, **kwargs) -> None:
-    if (
-      (self.user is not None)
-      and (self.email is not None)
-      and (self.email != self.user.email)
-    ):
-      # Force user.email to agree with contact.email
-      # TODO: This is because ProfileForm updates CONTACT, not USER
-      # TODO: Split ProfileForm into Contact and User (email + pw change)
-      # NOTE: This is assuming we want contact's email to mirrow USER's email
-      #       as opposed to the other way around.
-      self.user.email = self.email
-      self.user.save(update_fields=['email'])
-
-    if (not self.email) or (self._id and not self.lists.exists()):
+    if (not self.email) or (self._id and not self.list_memberships.exists()):
       kwargs['save_to_ctct'] = False
     return super().save(*args, **kwargs)
 
+  # Is there a better way to serialize?
   def serialize(self, method: str = 'POST') -> dict:
-    """Serialize to CTCT object, depending on PUT or POST method."""
+    """Serialize to CTCT object differently depending on PUT or POST method."""
+
     data = {
       'first_name': self.first_name.replace('.', ''),  # CTCT Bug
       'last_name': self.last_name,
       'job_title': self.job_title,
-      'company_name': self.company[:50],               # CTCT Limit
+      'company_name': self.company_name,
+      'custom_fields': [],
+      'phone_numbers': [],
+      'street_addresses': [],
     }
+
+    # TODO PUSH: Re-implement get_ctct_custom_field_id
+    for field_name in self.CUSTOM_FIELD_NAMES:
+      data['custom_fields'].append({
+        'custom_field_id': self.get_ctct_custom_field_id(field_name),
+        'value': getattr(self, field_name),
+      })
+
+    # Convert datetimes to strings
     for field_name in ['created_at', 'updated_at']:
       if date := getattr(self, field_name):
         data[field_name] = date.strftime(self.TS_FORMAT)
 
+    # Serialize related objects
+    for field_name in ['phone_numbers', 'street_addresses', 'notes']:
+      data[field_name].append(
+        obj.serialize() for obj in getattr(self, field_name).all()
+      )
+
+    # The `email_address` field behaves differently on update vs create
     if method == 'POST':
       data.update({
         'email_address': self.email,
@@ -751,7 +656,7 @@ class Contact(CTCTModel):
     elif method == 'PUT':
       data.update({
         'email_address': {'address': self.email},
-        'update_source': 'Contact',
+        'update_source': self.update_source,
       })
     else:
       message = (
@@ -759,24 +664,21 @@ class Contact(CTCTModel):
       )
       raise ValueError(message)
 
-    if self.county:
-      data['custom_fields'] = [{
-        'custom_field_id': self.get_ctct_custom_field_id('county'),
-        'value': self.county.name,
-      }]
-
+    # TODO PUSH: What is this?
     # Must specify one of 'source' or 'list_memberships'
-    if self.lists.count() == 0:
+    if self.list_memberships.count() == 0:
       data['source'] = 'Contact'
     else:
       data['list_memberships'] = list(
-        map(str, self.lists.values_list('id', flat=True))
+        map(str, self.list_memberships.values_list('id', flat=True))
       )
     return data
 
+  # TODO: Review this
   @classmethod
   def deserialize(cls, ctct_obj) -> dict:
     """Convert CTCT object to model field values."""
+
     CTCT_CUSTOM_FIELDS = {
       'county': '061bbb55bf6-11e3-a00e-d4ae529a863c',
     }
@@ -797,10 +699,7 @@ class Contact(CTCTModel):
       # Full data available (e.g., from `ctct_read()`)
       data.update({
         'email': ctct_obj['email_address']['address'],
-        'company': ctct_obj.get('company_name', ''),
-        'county': Region.objects.filter(
-          name=custom_fields.get('county'),
-        ).first(),
+        'company_name': ctct_obj.get('company_name', ''),
         'created_at': timezone.make_aware(
           dt.datetime.strptime(ctct_obj['created_at'], cls.TS_FORMAT)
         ),
@@ -821,12 +720,12 @@ class Contact(CTCTModel):
         })
     return data
 
+  # TODO: Review this
   def ctct_create(self) -> dict:
     """Redirect to the 'update_or_create' endpoint.
 
     Notes
     -----
-
     Due to the fact that CTCT could already have entries for
     Contacts that do not have Django objects yet, we must use
     CTCT's `update_or_create` method, which will re-activate any
@@ -834,7 +733,7 @@ class Contact(CTCTModel):
     deleted ('deactivated' to use CTCT's term).
 
     Due to the design of CTCT's API, updates to existing Contacts
-    are only partial updates, and as such cannot be used to remove/
+    are only partial updates, and as such cannot be used to remove or
     add the Contact from ContactLists; use the `ctct_update_lists()`
     method.
 
@@ -875,7 +774,7 @@ class Contact(CTCTModel):
 
     return ctct_obj
 
-  def ctct_update_lists(self) -> None | dict:
+  def ctct_update_lists(self) -> Optional[dict]:
     """Update Contact and ContactList membership on CTCT servers.
 
     Notes
@@ -884,17 +783,18 @@ class Contact(CTCTModel):
     body with NULL, so we need to make sure the `serialize()` method
     includes all important fields. While the `create_or_update()` method
     supports partial updates, it won't allow us to remove a ContactList,
-    so we must use the PUT method.
+    so we must use the PUT method for that.
 
     CTCT requires that all contacts be a member of at least one ContactList,
-    so in the event of removing someone from all lists, we much actually
+    so in the event of removing someone from all lists, we should actually
     issue a DELETE call; however, these 'deleted' Contacts retain their ID
-    and can be revived at any time.
+    in ConstantContact's database and can be revived at any time.
 
     """
+
     if self.optout:
       response = {}
-    elif not self.lists.exists():
+    elif not self.list_memberships.exists():
       self.ctct_delete()
       return None
     else:
@@ -906,6 +806,7 @@ class Contact(CTCTModel):
       ctct_obj = self.raise_or_json(response)
       return ctct_obj
 
+  # TODO: Review this
   @classmethod
   def get_ctct_custom_field_id(cls, name: str) -> dict:
     """Get the CTCT id for custom field.
@@ -930,36 +831,18 @@ class Contact(CTCTModel):
       if custom_field['name'].lower() == name.lower():
         return custom_field['custom_field_id']
 
-  def get_list(
-    self,
-    name: str = '',
-    names: list = [],
-  ) -> ContactList | None:
-    if name:
-      names = [name]
-    contact_list = self.lists.filter(name__in=names).first()
-    return contact_list
 
-
-@receiver(m2m_changed, sender=Contact.lists.through)
+@receiver(m2m_changed, sender=Contact.list_memberships.through)
 def ctct_update_contact_lists(sender, instance, action, **kwargs):
-  """Updates a Contact's list membership on CTCT servers.
-
-  Notes
-  -----
-  Since the bulk M2M methods `.add()`, `.remove()` etc do not fire
-  the `save()` method, we must update values on CTCT servers using
-  the `m2m_changed` signal.
-
-  """
+  """Updates a Contact's list membership on CTCT servers."""
 
   if action in ['post_add', 'post_remove', 'post_clear']:
-    # Update list membership on CTCT servers
     if settings.DEBUG:
       message = (
         "Saving to ConstantContact not supported while in DEBUG mode."
       )
       warnings.warn(message)
+    # TODO: Update this to use the False | 'async' | 'sync' method
     elif getattr(instance, 'save_to_ctct', True):
       delay = getattr(instance, 'delay', True)
       if isinstance(instance, Contact):
@@ -975,25 +858,36 @@ def ctct_update_contact_lists(sender, instance, action, **kwargs):
           ctct_add_list_memberships_job(instance, contacts)
 
 
-class ContactNote(models.Model):
-  """A note regarding a Contact."""
+class Note(models.Model):
+  """Django implementation of a CTCT Note."""
+
+  MAX_NUM = 150
 
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
     related_name='notes',
+    verbose_name=_('Contact'),
   )
-  note = models.CharField(
-    max_length=255,
+  note_id = models.UUIDField(
+    primary_key=True,
+    default=uuid.uuid4,
+    editable=False,
   )
-  timestamp = models.DateTimeField(
+  created_at = models.DateTimeField(
     auto_now=True,
+    verbose_name=_('Created at'),
+    help_text=_('The date the note was created'),
+  )
+  content = models.CharField(
+    max_length=2000,
+    verbose_name=_('Content'),
+    help_text=_('The content for the note'),
   )
   author = models.ForeignKey(
     settings.AUTH_USER_MODEL,
     on_delete=models.CASCADE,
-    limit_choices_to={'is_staff': True},
-    editable=False,
+    verbose_name=_('Author'),
   )
 
   class Meta:
@@ -1004,116 +898,98 @@ class ContactNote(models.Model):
     return self.note
 
 
-# class Address(models.Model):
-#   """Sub-model representing an address."""
-#
-#   contact = models.ForeignKey(
-#     Contact,
-#     on_delete=models.CASCADE,
-#     related_name='addresses',
-#   )
-#   address = models.CharField(
-#     max_length=255,
-#     blank=True,
-#   )
-#   address_2 = models.CharField(
-#     max_length=255,
-#     blank=True,
-#   )
-#   city = models.CharField(
-#     max_length=255,
-#     blank=True,
-#   )
-#   county = models.ForeignKey(
-#     Region,
-#     limit_choices_to={'category': 'COUNTY'},
-#     on_delete=models.SET_NULL,
-#     null=True,
-#     blank=True,
-#     help_text=_(
-#       'Select and type to filter options'
-#     ),
-#     related_name='county_contacts',
-#   )
-#   state = models.ForeignKey(
-#     Region,
-#     limit_choices_to={'category': 'STATE'},
-#     on_delete=models.SET_NULL,
-#     null=True,
-#     related_name='state_contacts',
-#   )
-#   zip_code = models.CharField(
-#     max_length=10,
-#     blank=True,
-#     verbose_name=_("ZIP Code"),
-#     validators=[RegexValidator(
-#       regex=r'(^\d{5}$)|(^\d{9}$)|(^\d{5}-\d{4}$)',
-#       message=_("ZIP Code must be 5 or 9 digits"),
-#     )],
-#   )
+class PhoneNumber(models.Model):
+  """Django implementation of a CTCT PhoneNumber."""
+
+  MAX_NUM = 3
+  KINDS = (
+    ('home', 'Home'),
+    ('work', 'Work'),
+    ('mobile', 'Mobile'),
+    ('other', 'Other'),
+  )
+
+  contact = models.ForeignKey(
+    Contact,
+    on_delete=models.CASCADE,
+    related_name='phone_numbers',
+    verbose_name=_('Contact'),
+  )
+  kind = models.CharField(
+    choices=KINDS,
+    max_length=6,
+    verbose_name=_('Kind'),
+    help_text=_('Identifies the type of phone number'),
+  )
+  phone_number = PhoneNumberField(
+    verbose_name=_('Phone Number'),
+    help_text=_("The contact's phone number"),
+  )
+
+  class Meta:
+    verbose_name = _('Phone Number')
+    verbose_name_plural = _('Phone Numbers')
+
+
+class StreetAddress(models.Model):
+  """Django implementation of a CTCT StreetAddress."""
+
+  MAX_NUM = 3
+  KINDS = (
+    ('home', 'Home'),
+    ('work', 'Work'),
+    ('other', 'Other'),
+  )
+
+  contact = models.ForeignKey(
+    Contact,
+    on_delete=models.CASCADE,
+    related_name='street_addresses',
+    verbose_name=_('Contact'),
+  )
+  kind = models.CharField(
+    choices=KINDS,
+    max_length=5,
+    verbose_name=_('Kind'),
+    help_text=_('Describes the type of address'),
+  )
+  street = models.CharField(
+    max_length=255,
+    verbose_name=_('Street'),
+    help_text=_('Number and street of the address'),
+  )
+  city = models.CharField(
+    max_length=50,
+    verbose_name=_('City'),
+    help_text=_('The name of the city where the contact lives'),
+  )
+  state = models.CharField(
+    max_length=50,
+    verbose_name=_('State'),
+    help_text=_('The name of the state or province where the contact lives'),
+  )
+  postal_code = models.CharField(
+    max_length=50,
+    verbose_name=_('Postal Code'),
+    help_text=_('The zip or postal code of the contact'),
+  )
+  country = models.CharField(
+    max_length=50,
+    verbose_name=_('Country'),
+    help_text=_('The name of the country where the contact lives'),
+  )
+
+  class Meta:
+    verbose_name = _('Street Address')
+    verbose_name_plural = _('Street Addresses')
 
 
 class EmailCampaign(CTCTModel):
-  """Django implementation of a CTCT EmailCampaign.
-
-  Notes
-  -----
-  We must be careful to NOT send Newsletters any other
-  ContactList except for the 'Newsletter: Comps' list,
-  since the default email contains a paywall URL.
-
-  Instead, a copy of the EmailCampaign must be made in
-  ConstantContact and the button URL changed to that of
-  the hosted PDF (e.g., upload the PDF to "My Documents"
-  using CTCT's website and then copy/paste the URL into
-  BOTH buttons in the EmailCampaing (e.g., Outlook one
-  and the regular one).
-
-  """
+  """Django implementation of a CTCT EmailCampaign."""
 
   API_ENDPOINT = '/v3/emails'
   API_ID_LABEL = 'campaign_id'
 
-  POST_CATEGORIES = {
-    'COLUMN': [
-      'Internal',
-      'Column: Website',
-      'Column: Office',
-    ],
-    'BRIEF': [
-      'Internal',
-      'Media',
-      'Public Officials',
-      'Column: Website',
-      'Column: Office',
-      'Newsletter: Paid',
-      'Newsletter: Comps',
-    ],
-    'REPORT': [
-      'Internal',
-      'Media',
-      'Public Officials',
-      'Column: Website',
-      'Column: Office',
-      'Newsletter: Paid',
-      'Newsletter: Comps',
-    ],
-    'PRESSRELEASE': [
-      'Internal',
-      'Media',
-      'Public Officials',
-      'Column: Website',
-      'Column: Office',
-      'Newsletter: Paid',
-      'Newsletter: Comps',
-    ],
-    'NEWSLETTER': [
-      # DO NOT SEND to "Newsletter: Comps", see Notes!
-      'Internal',
-      'Newsletter: Paid',
-    ],
-    'EMAIL': [],
-  }
   STATUSES = (
     ('NONE', 'Processing'),
     ('DRAFT', 'Draft'),
@@ -1139,18 +1015,20 @@ class EmailCampaign(CTCTModel):
     'ERROR': ACTIONS[:1],
     'REMOVED': ACTIONS[:1],
   }
-  NAME_MAX_LENGTH = 80  # Set by CTCT API
+  NAME_MAX_LENGTH = 80
 
   name = models.CharField(
     max_length=NAME_MAX_LENGTH,
     unique=True,
+    verbose_name=_('Name'),
   )
   post = models.OneToOneField(
     settings.CTCT_POST_MODEL,
     on_delete=models.CASCADE,
     related_name='campaign',
+    verbose_name=_('Post'),
   )
-  status = models.CharField(
+  current_status = models.CharField(
     choices=STATUSES,
     max_length=20,
     default='NONE',
@@ -1211,16 +1089,14 @@ class EmailCampaign(CTCTModel):
     max_digits=5,
     decimal_places=4,
     default=0,
+    verbose_name=_('Open Rate'),
     help_text=_('Number of opens as a percentage of total sends'),
-  )
-  debug = models.BooleanField(
-    default=False,
   )
 
   class Meta:
     verbose_name = _('Email Campaign')
     verbose_name_plural = _('Email Campaigns')
-    ordering = ('-post__publish_date', '-scheduled_datetime')
+    ordering = ('-scheduled_datetime')
 
   def __str__(self) -> str:
     return self.name
@@ -1228,7 +1104,7 @@ class EmailCampaign(CTCTModel):
   def clean(self):
     """Validate scheduled_datetime."""
     if (
-      (self.status != 'DONE') and
+      (self.current_status != 'DONE') and
       (self.scheduled_datetime is not None) and
       (self.scheduled_datetime < timezone.now() + dt.timedelta(minutes=30))
     ):
@@ -1237,18 +1113,20 @@ class EmailCampaign(CTCTModel):
       )
       raise ValidationError(message)
 
+  # TODO: Is this the cause of our errors?
   def save(self, *args, **kwargs) -> None:
     # Set `name` field to avoid uniqueness conflicts in case API call fails
     self.name = self._get_name()
     super().save(*args, **kwargs)
 
+  # TODO: Review
   @classmethod
   def deserialize(self, ctct_obj) -> dict:
     data = super().deserialize(ctct_obj)
 
     # Set model fields based on CTCT response
-    if status := ctct_obj.get('current_status'):
-      data['status'] = status.upper()
+    if current_status := ctct_obj.get('current_status'):
+      data['current_status'] = current_status.upper()
     if post_id := ctct_obj.get('post_id'):
       # Set in `ctct_create()`
       data['post_id'] = post_id
@@ -1265,7 +1143,7 @@ class EmailCampaign(CTCTModel):
         'open_rate': (opens / sends) if sends else 0,
       })
       if sends:
-        data['status'] = 'DONE'
+        data['current_status'] = 'DONE'
 
     return data
 
@@ -1280,12 +1158,6 @@ class EmailCampaign(CTCTModel):
 
     """
 
-    if self.post.category not in self.POST_CATEGORIES:
-      message = (
-        f'EmailCampaigns not available for {self.post.get_category_display()}.'
-      )
-      raise ValidationError(message)
-
     # Set name and initialize the CampaignActivity object (do not create it!)
     self.name = self._get_name()
     activity = CampaignActivity(
@@ -1299,18 +1171,20 @@ class EmailCampaign(CTCTModel):
       headers=self.headers,
       json={
         'name': self.name,
+        # TODO: Replace this with activity.serialize()?
         'email_campaign_activities': [{
           'format_type': activity.format_type,
           'from_email': activity.from_email,
           'reply_to_email': activity.reply_to_email,
           'from_name': activity.from_name,
-          'subject': activity.subject,
-          'html_content': activity.html_content,
-          'preheader': activity.preheader,
+          'subject': activity.get_subject(),
+          'html_content': activity.get_html_content(),
+          'preheader': activity.get_preheader(),
           'physical_address_in_footer': activity.physical_address,
         }],
       },
     )
+
     if response.status_code == 409:
       # EmailCampaign name not unique, fetch existing EmailCampaign from CTCT
       ctct_obj = self.ctct_read(name=self.name)
@@ -1331,26 +1205,27 @@ class EmailCampaign(CTCTModel):
     # Schedule and send preview
     if self.action == 'CREATE':
       activity.ctct_send_preview()
-      self.status = 'DRAFT'
+      self.current_status = 'DRAFT'
     elif self.action == 'SCHEDULE':
       activity.ctct_send_preview()
       activity.ctct_schedule()
-      self.status = 'SCHEDULED'
+      self.current_status = 'SCHEDULED'
     elif self.campaign.action == 'UNSCHEDULE':
       activity.ctct_unschedule()
-      self.status = 'DRAFT'
+      self.current_status = 'DRAFT'
     self.action = 'NONE'
 
     # Update CTCT response with local field values
     ctct_obj.update({
-      'current_status': self.status,
+      'current_status': self.current_status,
       'action': self.action,
     })
 
     return ctct_obj
 
-  def ctct_read(self, name: str = '') -> dict | None:
+  def ctct_read(self, name: Optional[str] = None) -> Optional[dict]:
     """Retrieve EmailCampaign from CTCT servers."""
+
     if self.id:
       ctct_obj = super().ctct_read()
     elif name:
@@ -1406,6 +1281,8 @@ class EmailCampaign(CTCTModel):
     ctct_obj = self.raise_or_json(response)
     return ctct_obj
 
+  # TODO: Review. Is this even needed? Should it be a field?
+  #       Do a grep for it
   def _get_name(self) -> str:
     """Returns the CTCT EmailCampaign name."""
 
@@ -1424,6 +1301,7 @@ class EmailCampaign(CTCTModel):
 
     return name
 
+  # TODO: Is this better moved to admin.py? It's used in www.POSTS.admin
   def _get_message(self) -> str:
     """Django admin message about EmailCampaign status."""
     if self.action == 'CREATE':
@@ -1472,37 +1350,22 @@ class CampaignActivity(CTCTModel):
     ('permalink', 'Permalink'),
     ('resend', 'Resent'),
   )
-  PREVIEW_CONTACTS = {
-    'DEBUG': [
-      ('Geoffrey Eisenbarth', 'geoffrey.eisenbarth@gmail.com'),
-    ],
-    'COLUMN': [
-      ('Internal', 'info@perrymangroup.com'),
-      ('Shelia Smith', 'sheliaws64@gmail.com'),
-      ('Kevin Gleghorn', 'ckevingleghorn@gmail.com'),
-      ('Geoffrey Eisenbarth', 'geoffrey.eisenbarth@gmail.com'),
-    ],
-    'RELEASE': [
-      ('Internal', 'info@perrymangroup.com'),
-      ('Ray Perryman', 'ray@perrymangroup.com'),
-      ('Karen Amos', 'kamos@perrymangroup.com'),
-      ('Ginnie Gleghorn', 'ginniegleghorn@gmail.com'),
-      ('Geoffrey Eisenbarth', 'geoffrey.eisenbarth@gmail.com'),
-    ],
-  }
 
   campaign = models.ForeignKey(
     EmailCampaign,
     on_delete=models.CASCADE,
     related_name='activities',
+    verbose_name=_('Campaign'),
   )
   role = models.CharField(
     max_length=25,
     choices=ROLES,
     default='primary_email',
+    verbose_name=_('Role'),
   )
   contact_lists = models.ManyToManyField(
     ContactList,
+    verbose_name=_('Contact Lists'),
   )
 
   class Meta:
@@ -1516,6 +1379,39 @@ class CampaignActivity(CTCTModel):
       ),
     ]
 
+  @property
+  def format_type(self) -> int:
+    """CTCT's 'Modern Custom Code' format."""
+    return 5
+
+  @property
+  def from_email(self) -> str:
+    return settings.CTCT_FROM_EMAIL
+
+  @property
+  def reply_to_email(self) -> str:
+    return getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL)
+
+  @property
+  def from_name(self) -> str:
+    return settings.CTCT_FROM_NAME
+
+  @property
+  def physical_address(self) -> dict:
+    """Returns the company address for email footers."""
+    physical_address = getattr(settings, 'CTCT_PHYSICAL_ADDRESS', {
+      'address_line1': '',
+      'address_line2': '',
+      'address_optional': '',
+      'city': '',
+      'country_code': '',
+      'country_name': '',
+      'organization_name': '',
+      'postal_code': '',
+      'state_code': '',
+    })
+    return physical_address
+
   def __str__(self) -> str:
     if self.campaign:
       s = f'{self.campaign}, {self.get_role_display()}'
@@ -1523,14 +1419,15 @@ class CampaignActivity(CTCTModel):
       s = super().__str__
     return s
 
+  # TODO: Better way to serialize? to_dict()?
   def serialize(self) -> dict:
     data = {
       'from_name': self.from_name,
       'from_email': self.from_email,
       'reply_to_email': self.reply_to_email,
-      'subject': self.subject,
-      'html_content': self.html_content,
-      'preheader': self.preheader,
+      'subject': self.get_subject(),
+      'html_content': self.get_html_content(),
+      'preheader': self.get_preheader(),
     }
     if self.id:
       data.update({
@@ -1539,6 +1436,7 @@ class CampaignActivity(CTCTModel):
 
     return data
 
+  # TODO: Review
   def ctct_save(self) -> None:
     """Updates CampaignActivity on CTCT servers.
 
@@ -1561,19 +1459,11 @@ class CampaignActivity(CTCTModel):
       # Primary Email Activities can only be updated, not created
       self.ctct_update()
 
-  def _get_contact_lists(self) -> 'QuerySet[ContactList]':
-    """Sets ContactLists based on the EmailCampaign's Post."""
-    if self.campaign.debug:
-      names = ['DEBUG']
-    else:
-      names = EmailCampaign.POST_CATEGORIES[self.campaign.post.category]
-    return ContactList.objects.filter(name__in=names)
-
   def ctct_update(self) -> dict:
     """Update CampaignActivity on CTCT servers."""
 
     # Can only update if status is in DRAFT or SENT status
-    if self.campaign.status == 'SCHEDULED':
+    if self.campaign.current_status == 'SCHEDULED':
       self.ctct_unschedule()
 
     # Rename EmailCampaign on CTCT servers if the title changed
@@ -1590,7 +1480,7 @@ class CampaignActivity(CTCTModel):
     self.ctct_send_preview()
 
     # Re-schedule if EmailCampaign was originally scheduled
-    if self.campaign.status == 'SCHEDULED':
+    if self.campaign.current_status == 'SCHEDULED':
       self.ctct_schedule()
 
     return ctct_obj
@@ -1607,29 +1497,6 @@ class CampaignActivity(CTCTModel):
     )
     self.raise_or_json(response)
 
-  def _get_preview_recipients(self) -> list:
-    """Determines who receives the CTCT preview emails."""
-    if self.campaign.debug:
-      preview_list = 'DEBUG'
-    elif self.campaign.post.category == 'COLUMN':
-      preview_list = 'COLUMN'
-    else:
-      preview_list = 'RELEASE'
-    return [email for (name, email) in self.PREVIEW_CONTACTS[preview_list]]
-
-  def _get_preview_message(self) -> str:
-    """Writes the message sent with preview emails."""
-
-    author = self.campaign.post.author.first_name
-    admin = settings.ADMINS[0][0].split()[0]
-    message = f'Please let {author or admin} know if you have any edits. '
-
-    if datetime := self.campaign.scheduled_datetime:
-      datetime = datetime.strftime('%A, %B %d @ %I:%M %p')
-      message += f'This campaign will be sent on {datetime}.'
-
-    return message
-
   def ctct_schedule(self) -> None:
     """Schedules the `primary_email` CampaignActivity.
 
@@ -1644,6 +1511,7 @@ class CampaignActivity(CTCTModel):
       raise ValueError(message)
 
     # Set the recipients based on EmailCampaign's Post category
+    # TODO: Remove Post.category dep
     contact_lists = self._get_contact_lists()
     self.contact_lists.set(contact_lists)
 
@@ -1667,25 +1535,42 @@ class CampaignActivity(CTCTModel):
     """Unschedules the `primary_email` CampaignActivity."""
     super().ctct_delete(suffix='/schedules')
 
-  @property
-  def format_type(self) -> int:
-    """CTCT's 'Modern Custom Code' format."""
-    return 5
+  # TODO: How to do this?
+  def _get_contact_lists(self) -> 'QuerySet[ContactList]':
+    """Sets ContactLists based on the EmailCampaign's Post."""
+    if self.campaign.debug:
+      names = ['DEBUG']
+    else:
+      names = EmailCampaign.POST_CATEGORIES[self.campaign.post.category]
+    return ContactList.objects.filter(name__in=names)
 
-  @property
-  def from_email(self) -> str:
-    return settings.CTCT_FROM_EMAIL
+  # TODO: Remove TPG dependency
+  def _get_preview_recipients(self) -> list:
+    """Determines who receives the CTCT preview emails."""
+    if self.campaign.debug:
+      preview_list = 'DEBUG'
+    elif self.campaign.post.category == 'COLUMN':
+      preview_list = 'COLUMN'
+    else:
+      preview_list = 'RELEASE'
+    return [email for (name, email) in self.PREVIEW_CONTACTS[preview_list]]
 
-  @property
-  def reply_to_email(self) -> str:
-    return getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL)
+  # TODO: Remove TPG dependency
+  def _get_preview_message(self) -> str:
+    """Writes the message sent with preview emails."""
 
-  @property
-  def from_name(self) -> str:
-    return settings.CTCT_FROM_NAME
+    author = self.campaign.post.author.first_name
+    admin = settings.ADMINS[0][0].split()[0]
+    message = f'Please let {author or admin} know if you have any edits. '
 
-  @property
-  def subject(self) -> str:
+    if datetime := self.campaign.scheduled_datetime:
+      datetime = datetime.strftime('%A, %B %d @ %I:%M %p')
+      message += f'This campaign will be sent on {datetime}.'
+
+    return message
+
+  # TODO: How to customize these?
+  def get_subject(self) -> str:
     """Returns the subject line based on the Post title."""
     if self.campaign.post.category == 'COLUMN':
       subject = f'Dr. Ray Perryman: "{self.campaign.post.title}"'
@@ -1698,8 +1583,9 @@ class CampaignActivity(CTCTModel):
       )
     return subject
 
-  @property
-  def preheader(self) -> str:
+  # TODO: How to customize these?
+  # TODO: Remove bs4 dep
+  def get_preheader(self) -> str:
     """Returns the email preheader based on the Post content."""
     preheader = (
       BeautifulSoup(self.campaign.post.content, features='lxml')
@@ -1711,8 +1597,9 @@ class CampaignActivity(CTCTModel):
     )
     return preheader
 
-  @property
-  def html_content(self) -> str:
+  # TODO: How to customize these?
+  # TODO: Should html_content just be a field that can be written to in admin?
+  def get_html_content(self) -> str:
     """Returns the email content as HTML."""
 
     html_content = render_to_string(
@@ -1723,19 +1610,3 @@ class CampaignActivity(CTCTModel):
       },
     )
     return html_content
-
-  @property
-  def physical_address(self) -> dict:
-    """Returns the company address for email footers."""
-    physical_address = getattr(settings, 'CTCT_PHYSICAL_ADDRESS', {
-      'address_line1': '',
-      'address_line2': '',
-      'address_optional': '',
-      'city': '',
-      'country_code': '',
-      'country_name': '',
-      'organization_name': '',
-      'postal_code': '',
-      'state_code': '',
-    })
-    return physical_address

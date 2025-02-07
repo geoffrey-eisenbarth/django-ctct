@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from time import sleep
+from typing import Optional
 
 from django.db.models import QuerySet
 
@@ -23,7 +24,7 @@ method), then you must use either `bulk_create` or `bulk_update`.
 
 
 @job
-def ctct_save_job(obj: 'CTCTModel') -> None | dict:
+def ctct_save_job(obj: 'CTCTModel') -> Optional[dict]:
   if obj._id:
     ctct_obj = obj.ctct_save()
 
@@ -60,9 +61,9 @@ def ctct_update_lists_job(contact: 'Contact') -> None:
 
   The primary issue is that we want to make sure that a Contact.ctct_save()
   call isn't made after this call, since that will revive the Contact in
-  the event that they had been 'DELETE'd from CTCT servers due to no
-  longer belonging to any ContactLists (CTCT requires that Contacts must
-  belong to at least one ContactList).
+  the event that they had been deleted from CTCT servers due to no longer
+  belonging to any ContactLists (CTCT requires that Contacts must belong to
+  at least one ContactList).
 
   """
 
