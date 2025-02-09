@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
   Token, ContactList,
-  Contact, StreetAddress, PhoneNumber, Note,
+  Contact, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity
 )
 
@@ -130,7 +130,7 @@ class ContactListAdmin(admin.ModelAdmin):
     return obj.contacts.count()
   membership.short_description = _('Membership')
 
-  def optouts(self, obj: ContactList) -> int: (and update_or_create)
+  def optouts(self, obj: ContactList) -> int:
     return obj.contacts.filter(optout=True).count()
   optouts.short_description = _('Opt Outs')
 
@@ -180,35 +180,35 @@ class ContactStatusFilter(admin.SimpleListFilter):
     return queryset
 
 
-class StreetAddressInline(admin.TabularInline):
-  """Inline for adding StreetAddresses to a Contact."""
+class ContactStreetAddressInline(admin.TabularInline):
+  """Inline for adding ContactStreetAddresses to a Contact."""
 
-  model = StreetAddress
+  model = ContactStreetAddress
   extra = 0
-  max_num = StreetAddress.API_MAX_NUM
+  max_num = ContactStreetAddress.API_MAX_NUM
 
 
-class PhoneNumberInline(admin.TabularInline):
-  """Inline for adding PhoneNumbers to a Contact."""
+class ContactPhoneNumberInline(admin.TabularInline):
+  """Inline for adding ContactPhoneNumbers to a Contact."""
 
-  model = PhoneNumber
+  model = ContactPhoneNumber
   extra = 0
-  max_num = PhoneNumber.API_MAX_NUM
+  max_num = ContactPhoneNumber.API_MAX_NUM
 
 
-class NoteInline(admin.TabularInline):
-  """Inline for adding Notes to a Contact."""
+class ContactNoteInline(admin.TabularInline):
+  """Inline for adding ContactNotes to a Contact."""
 
-  model = Note
+  model = ContactNote
   extra = 0
-  max_num = Note.API_MAX_NUM
+  max_num = ContactNote.API_MAX_NUM
 
   readonly_fields = ['author', 'timestamp']
 
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Note] = None,
+    obj: Optional[ContactNote] = None,
   ) -> bool:
     return False
 
@@ -284,9 +284,9 @@ class ContactAdmin(admin.ModelAdmin):
   )
   filter_horizontal = ('list_memberships', )
   inlines = (
-    StreetAddressInline,
-    PhoneNumberInline,
-    NoteInline,
+    ContactStreetAddressInline,
+    ContactPhoneNumberInline,
+    ContactNoteInline,
   )
 
   def get_readonly_fields(
@@ -311,7 +311,7 @@ class ContactAdmin(admin.ModelAdmin):
     formset: BaseInlineFormSet,
     change: bool,
   ) -> None:
-    if formset.model == Note:
+    if formset.model == ContactNote:
       instances = formset.save(commit=False)
       for obj in formset.deleted_objects:
         obj.delete()
@@ -324,9 +324,9 @@ class ContactAdmin(admin.ModelAdmin):
       return super().save_formset(request, form, formset, change)
 
 
-@admin.register(Note)
-class NoteAdmin(admin.ModelAdmin):
-  """Admin functionality for Notes."""
+@admin.register(ContactNote)
+class ContactNoteAdmin(admin.ModelAdmin):
+  """Admin functionality for ContactNotes."""
 
   # ListView
   search_fields = (
@@ -375,14 +375,14 @@ class NoteAdmin(admin.ModelAdmin):
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Note] = None,
+    obj: Optional[ContactNote] = None,
   ) -> bool:
     return False
 
   def has_add_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Note] = None,
+    obj: Optional[ContactNote] = None,
   ) -> bool:
     return False
 
@@ -415,7 +415,7 @@ class EmailCampaignAdmin(ViewModelAdmin):
     'name',
     'current_status',
     'scheduled_datetime',
-    'open_rate_str',
+    'open_rate',
     'sends',
     'bounces',
     'clicks',
@@ -430,8 +430,8 @@ class EmailCampaignAdmin(ViewModelAdmin):
     else:
       s = 'N/A'
     return s
-  open_rate_str.admin_order_field = 'open_rate'
-  open_rate_str.short_description = _('Open Rate')
+  open_rate.admin_order_field = 'open_rate'
+  open_rate.short_description = _('Open Rate')
 
   # ChangeView
   inlines = (CampaignActivityInline, )
@@ -452,12 +452,12 @@ class EmailCampaignAdmin(ViewModelAdmin):
       'UPDATE': _(
         'The campaign has been updated and a preview has been sent out for approval.'  # noqa 501
         'out for approval.'
-      )
+      ),
       'SCHEDULE': _(
         'The campaign has been scheduled and a preview has been sent out for approval.'  # noqa 501
-      )
+      ),
       'UNSCHEDULE': _(
         'The campaign has been unscheduled.'
-      )
+      ),
     }[obj.action]
     self.message_user(request, message)
