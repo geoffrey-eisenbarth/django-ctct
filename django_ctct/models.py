@@ -285,7 +285,7 @@ class Token(models.Model):
   )
 
   class Meta:
-    ordering = ['-inserted']
+    ordering = ('-inserted', )
 
   def __str__(self) -> str:
     # TODO PUSH: Remove pytz in favor of timezone?
@@ -428,7 +428,7 @@ class ContactList(CTCTModel):
   class Meta:
     verbose_name = _('Contact List')
     verbose_name_plural = _('Contact Lists')
-    ordering = ['-favorite', 'name']
+    ordering = ('-favorite', 'name')
 
   def __str__(self) -> str:
     return self.name
@@ -490,6 +490,7 @@ class CustomField(CTCTModel):
     ),
   )
   type = models.CharField(
+    max_length=6,
     choices=TYPES,
     verbose_name=_('Type'),
     help_text=_(
@@ -660,7 +661,7 @@ class Contact(CTCTModel):
   class Meta:
     verbose_name = _('Contact')
     verbose_name_plural = _('Contacts')
-    ordering = ['-updated_at']
+    ordering = ('-updated_at', )
 
   def __str__(self) -> str:
     if self.name and self.email:
@@ -848,6 +849,7 @@ def ctct_update_contact_lists(sender, instance, action, **kwargs):
 class ContactNote(CTCTLocalModel):
   """Django implementation of a CTCT Note."""
 
+  API_ID_LABEL = 'note_id'
   API_BODY_FIELDS = (
     'note_id',
     'created_at',
@@ -860,11 +862,6 @@ class ContactNote(CTCTLocalModel):
     on_delete=models.CASCADE,
     related_name='notes',
     verbose_name=_('Contact'),
-  )
-  note_id = models.UUIDField(
-    primary_key=True,
-    default=uuid.uuid4,
-    editable=False,
   )
   created_at = models.DateTimeField(
     auto_now=True,
@@ -1141,7 +1138,7 @@ class EmailCampaign(CTCTModel):
   class Meta:
     verbose_name = _('Email Campaign')
     verbose_name_plural = _('Email Campaigns')
-    ordering = ('-scheduled_datetime')
+    ordering = ('-scheduled_datetime', )
 
   def __str__(self) -> str:
     return self.name

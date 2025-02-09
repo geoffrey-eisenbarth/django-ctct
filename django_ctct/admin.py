@@ -203,7 +203,7 @@ class ContactNoteInline(admin.TabularInline):
   extra = 0
   max_num = ContactNote.API_MAX_NUM
 
-  readonly_fields = ['author', 'timestamp']
+  readonly_fields = ['author', 'created_at']
 
   def has_change_permission(
     self,
@@ -362,7 +362,7 @@ class ContactNoteAdmin(admin.ModelAdmin):
     ('INTERNAL', {
       'fields': (
         'author',
-        'timestamp',
+        'created_at',
       ),
     }),
   )
