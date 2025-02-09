@@ -2,29 +2,57 @@ from typing import List, Tuple, Optional
 
 from django import forms
 from django.contrib import admin
+from django.db.models import Field as ModelField
 from django.db.models.query import QuerySet
 from django.forms import ModelForm
+from django.forms import Field as FormField
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
 from django.template.response import TemplateResponse
-from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
-  Token, Contact, ContactList, EmailCampaign,
-  StreetAddress, PhoneNumber, Note,
+  Token, ContactList,
+  Contact, StreetAddress, PhoneNumber, Note,
+  EmailCampaign, CampaignActivity
 )
 
-from accounts.core.admin import ViewModelAdmin
-from accounts.users.forms import ProfileForm
+
+class ViewModelAdmin(admin.ModelAdmin):
+  """Remove CRUD permissions."""
+
+  def has_add_permission(self, request, obj=None):
+    """Prevent creation in the Django admin."""
+    return False
+
+  def has_change_permission(self, request, obj=None):
+    """Prevent updates in the Django admin."""
+    return False
+
+  def get_readonly_fields(self, request, obj=None):
+    """Prevent updates in the Django admin."""
+    if obj:
+      readonly_fields = [
+        field.name
+        for field in obj._meta.fields
+        if field.name != 'active'
+      ]
+    else:
+      readonly_fields = []
+    return readonly_fields
+
+  def has_delete_permission(self, request, obj=None):
+    """Prevent deletion in the Django admin."""
+    return False
 
 
 @admin.register(Token)
 class TokenAdmin(ViewModelAdmin):
   """Admin functionality for CTCT Tokens."""
 
+  # ListView
   list_display = (
     'inserted',
     'copy_access_code',
@@ -50,6 +78,7 @@ class TokenAdmin(ViewModelAdmin):
     return html
   copy_refresh_code.short_description = _('Refresh Code')
 
+  # ChangeView
   def changeform_view(
     self,
     request: HttpRequest,
@@ -81,6 +110,7 @@ class ContactListForm(forms.ModelForm):
 class ContactListAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT ContactLists."""
 
+  # ListView
   list_display = (
     'name',
     'membership',
@@ -89,16 +119,6 @@ class ContactListAdmin(admin.ModelAdmin):
     'updated_at',
     'favorite',
     'synced',
-  )
-
-  form = ContactListForm
-  fieldsets = (
-    (None, {
-      'fields': (
-        ('name', 'favorite'),
-        'description',
-      ),
-    }),
   )
 
   def synced(self, obj: ContactList) -> bool:
@@ -110,9 +130,20 @@ class ContactListAdmin(admin.ModelAdmin):
     return obj.contacts.count()
   membership.short_description = _('Membership')
 
-  def optouts(self, obj: ContactList) -> int:
+  def optouts(self, obj: ContactList) -> int: (and update_or_create)
     return obj.contacts.filter(optout=True).count()
   optouts.short_description = _('Opt Outs')
+
+  # ChangeView
+  form = ContactListForm
+  fieldsets = (
+    (None, {
+      'fields': (
+        ('name', 'favorite'),
+        'description',
+      ),
+    }),
+  )
 
 
 class ContactStatusFilter(admin.SimpleListFilter):
@@ -154,7 +185,7 @@ class StreetAddressInline(admin.TabularInline):
 
   model = StreetAddress
   extra = 0
-  max_num = StreetAddress.MAX_NUM
+  max_num = StreetAddress.API_MAX_NUM
 
 
 class PhoneNumberInline(admin.TabularInline):
@@ -162,7 +193,7 @@ class PhoneNumberInline(admin.TabularInline):
 
   model = PhoneNumber
   extra = 0
-  max_num = PhoneNumber.MAX_NUM
+  max_num = PhoneNumber.API_MAX_NUM
 
 
 class NoteInline(admin.TabularInline):
@@ -170,7 +201,7 @@ class NoteInline(admin.TabularInline):
 
   model = Note
   extra = 0
-  max_num = Note.MAX_NUM
+  max_num = Note.API_MAX_NUM
 
   readonly_fields = ['author', 'timestamp']
 
@@ -186,6 +217,7 @@ class NoteInline(admin.TabularInline):
 class ContactAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT Contacts."""
 
+  # ListView
   search_fields = (
     'email',
     'first_name',
@@ -195,7 +227,6 @@ class ContactAdmin(admin.ModelAdmin):
     'city',
   )
 
-  ordering = ('-updated_at', )
   list_display = (
     'email',
     'name',
@@ -209,6 +240,26 @@ class ContactAdmin(admin.ModelAdmin):
   )
   empty_value_display = '(None)'
 
+  def ctct(self, obj: Contact) -> str:
+    if not obj.id:
+      text = 'Not Synced'
+      color = 'bad'
+    elif obj.optout:
+      text = 'Opted Out'
+      color = 'warn'
+    else:
+      text = 'Synced'
+      color = 'ok'
+
+    html = (
+      f'<span class="{color} badge">'
+      f'{text}'
+      '</span>'
+    )
+    return mark_safe(html)
+  ctct.short_description = 'CTCT'
+
+  # ChangeView
   fieldsets = (
     (None, {
       'fields': (
@@ -238,24 +289,6 @@ class ContactAdmin(admin.ModelAdmin):
     NoteInline,
   )
 
-  def ctct(self, obj: Contact) -> str:
-    if not obj.id:
-      text = 'Not Synced'
-      color = 'bad'
-    elif obj.optout:
-      text = 'Opted Out'
-      color = 'warn'
-    else:
-      text = 'Synced'
-      color = 'ok'
-
-    html = (
-      f'<span class="{color} badge">'
-      f'{text}'
-      '</span>'
-    )
-    return mark_safe(html)
-
   def get_readonly_fields(
     self,
     request: HttpRequest,
@@ -267,8 +300,6 @@ class ContactAdmin(admin.ModelAdmin):
       'optout',
       'optout_at',
     ]
-    if getattr(obj, 'user', False):
-      readonly_fields += ProfileForm._meta.fields
     if getattr(obj, 'optout', False) and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
@@ -297,6 +328,7 @@ class ContactAdmin(admin.ModelAdmin):
 class NoteAdmin(admin.ModelAdmin):
   """Admin functionality for Notes."""
 
+  # ListView
   search_fields = (
     'content',
     'contact__email',
@@ -319,6 +351,7 @@ class NoteAdmin(admin.ModelAdmin):
     'author',
   )
 
+  # ChangeView
   fieldsets = (
     (None, {
       'fields': (
@@ -354,14 +387,33 @@ class NoteAdmin(admin.ModelAdmin):
     return False
 
 
+class CampaignActivityInline(admin.StackedInline):
+  """Inline for adding CampaignActivity to a EmailCampaign."""
+
+  model = CampaignActivity
+  extra = 1
+  max_num = 1
+
+  def formfield_for_dbfield(
+    self,
+    db_field: ModelField,
+    request: HttpRequest,
+  ) -> FormField:
+    formfield = {
+      'html_content': forms.Textarea,
+    }.get(db_field.name, super().formfield_for_dbfield(db_field, request))
+    return formfield
+
+
 @admin.register(EmailCampaign)
 class EmailCampaignAdmin(ViewModelAdmin):
   """Admin functionality for CTCT EmailCampaigns."""
 
+  # ListView
   search_fields = ('name', )
   list_display = (
-    'post__detail',             # TODO
-    'post__category',           # TODO
+    'name',
+    'current_status',
     'scheduled_datetime',
     'open_rate_str',
     'sends',
@@ -370,33 +422,42 @@ class EmailCampaignAdmin(ViewModelAdmin):
     'optouts',
     'abuse',
   )
-  list_select_related = ('post', )
 
-  def post__detail(self, obj: EmailCampaign) -> str:
-    url = reverse(
-      viewname='admin:posts_post_change',  # TODO
-      args=(obj.post.id, ),
-    )
-    html = (
-      f'<a href="{url}">'
-      f'<b>{obj.post.title}</b>'
-      '</a>'
-    )
-    return mark_safe(html)
-  post__detail.admin_order_field = 'post'
-  post__detail.short_description = _('Post')
-
-  def post__category(self, obj: EmailCampaign) -> str:
-    return obj.post.get_category_display()
-  post__category.admin_order_field = 'post__category'
-  post__category.short_description = _('Category')
-
-  def open_rate_str(self, obj: EmailCampaign) -> str:
-    return f'{obj.open_rate:0.2%}'
+  def open_rate(self, obj: EmailCampaign) -> str:
+    if obj.current_status == 'DONE':
+      r = (obj.opens / obj.sends) if obj.sends else 0
+      s = f'{r:0.2%}'
+    else:
+      s = 'N/A'
+    return s
   open_rate_str.admin_order_field = 'open_rate'
   open_rate_str.short_description = _('Open Rate')
 
-  def get_queryset(self, request: HttpRequest) -> QuerySet[EmailCampaign]:
-    qs = super().get_queryset(request)
-    qs = qs.filter(current_status='DONE')
-    return qs
+  # ChangeView
+  inlines = (CampaignActivityInline, )
+
+  def save_model(
+    self,
+    request: HttpRequest,
+    obj: EmailCampaign,
+    form: ModelForm,
+    change: bool,
+  ) -> None:
+    super().save_model(request, obj, form, change)
+    message = {
+      'CREATE': _(
+        'Campaign has been created and a preview has been sent for approval. '
+        'Once the campaign has been approved, you must schedule it.'
+      ),
+      'UPDATE': _(
+        'The campaign has been updated and a preview has been sent out for approval.'  # noqa 501
+        'out for approval.'
+      )
+      'SCHEDULE': _(
+        'The campaign has been scheduled and a preview has been sent out for approval.'  # noqa 501
+      )
+      'UNSCHEDULE': _(
+        'The campaign has been unscheduled.'
+      )
+    }[obj.action]
+    self.message_user(request, message)

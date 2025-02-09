@@ -14,9 +14,10 @@ from django_ctct.models import (
   Token, CTCTModel, Contact, ContactList, EmailCampaign, CampaignActivity,
 )
 
-from www.posts.models import Post
+from www.posts.models import Post  # TODO
 
 
+# TODO: Some of this is TPG specific
 class Command(BaseCommand):
   """Imports CTCT objects from CTCT servers.
 
@@ -47,6 +48,7 @@ class Command(BaseCommand):
     CampaignActivity: 'campaign_activities',
   }
 
+  # TODO: TPG
   DUPLICATED_EMAILS = [
     # For some reason, these email addresses are duplicated in CTCT
     'rudnickbk@aol.com',

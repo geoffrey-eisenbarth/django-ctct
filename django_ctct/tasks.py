@@ -12,13 +12,13 @@ from django_rq import job
 Notes
 -----
 
-Not sure why, but this seems to be the cleanest method of
-turning class methods into jobs. While preliminary testing
-did work for CTCTModel.ctct_save(), it didn't work for other
-class methods, so we decided to put them all together here.
+Not sure why, but this seems to be the cleanest method of turning class methods
+into jobs. While preliminary testing did work for CTCTModel.ctct_save(), it
+didn't work for other class methods, so we decided to put them all together
+here.
 
-If you want to avoid writing to CTCT servers (via the ctct_save
-method), then you must use either `bulk_create` or `bulk_update`.
+If you want to avoid writing to CTCT servers (via the ctct_save method), you can
+use `bulk_create` or `bulk_update`.
 
 """
 
@@ -47,6 +47,11 @@ def ctct_save_job(obj: 'CTCTModel') -> Optional[dict]:
 @job
 def ctct_delete_job(obj: 'CTCTModel') -> None:
   obj.ctct_delete()
+
+
+@job
+def ctct_rename_job(obj: 'EmailCampaign') -> None:
+  obj.ctct_rename()
 
 
 @job
