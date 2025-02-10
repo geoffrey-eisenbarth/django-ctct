@@ -23,7 +23,7 @@ class MockConstantContactAPI:
     status_code: int,
     id: Optional[str] = None,
   ):
-    url = f'{CTCTModel.BASE_URL}{endpoint}'
+    url = f'{CTCTModel.API_URL}{endpoint}'
     if id is not None:
       url = f'{url}/{id}'
 
