@@ -3,3 +3,4 @@ __pycache__/
 .*.sw*
 *.sqlite3
 migrations/
+local_settings.py
