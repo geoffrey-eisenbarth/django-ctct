@@ -92,6 +92,10 @@ Describe how to use your app.  Provide examples of common use cases.  For exampl
 
 Explain how to install dev dependencies and run the tests for your app.
 
+  * `./manage.py migrate`
+  * `./manage.py runserver`
+  * Visit `127.0.0.1:8000/ctct/auth/` and log into CTCT
+
 ## Contributing
 
 Explain how others can contribute to your app.
