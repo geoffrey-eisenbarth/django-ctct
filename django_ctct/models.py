@@ -96,11 +96,19 @@ class SerializerMixin:
       else:
         django_obj = cls()
 
+    # TODO: How to save related objects like ContactPhoneNumber?
+    related_objs = {}
     for field_name, value in data.items():
-      setattr(django_obj, field_name, value)
+      if isinstance(value, QuerySet):
+        # Defer related objects until object is saved
+        related_objs[field_name] = value
+      else:
+        setattr(django_obj, field_name, value)
 
     if save:
       django_obj.save(save_to_ctct=False)
+      for field_name, queryset in related_objs.items():
+        getattr(django_obj, field_name).set(queryset)
 
     return django_obj
 
@@ -108,7 +116,8 @@ class SerializerMixin:
 class CTCTModel(SerializerMixin, models.Model):
   """Common CTCT model methods and properties."""
 
-  BASE_URL = 'https://api.cc.email/v3'
+  API_VERSION = '/v3'
+  API_URL = f'https://api.cc.email{API_VERSION}'
 
   save_to_ctct: Optional[Literal['sync', 'async']] = 'async'
 
@@ -178,7 +187,7 @@ class CTCTModel(SerializerMixin, models.Model):
 
   def ctct_create(self) -> dict:
     response = requests.post(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}',
       headers=self.headers,
       json=self.serialize(),
     )
@@ -194,7 +203,7 @@ class CTCTModel(SerializerMixin, models.Model):
       raise AttributeError(f"{self} has no id.")
 
     response = requests.get(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}',
       headers=self.headers,
     )
     ctct_obj = self.raise_or_json(response)
@@ -202,7 +211,7 @@ class CTCTModel(SerializerMixin, models.Model):
 
   def ctct_update(self) -> dict:
     response = requests.put(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}',
       headers=self.headers,
       json=self.serialize(),
     )
@@ -211,7 +220,7 @@ class CTCTModel(SerializerMixin, models.Model):
 
   def ctct_delete(self, suffix: str = '') -> None:
     response = requests.delete(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}{suffix}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}{suffix}',
       headers=self.headers,
     )
     try:
@@ -308,7 +317,7 @@ class Token(models.Model):
       self.access_code,
       signing_key.key,
       algorithms=['RS256'],
-      audience=f'{CTCTModel.BASE_URL}',
+      audience=f'{CTCTModel.API_URL}',
     )
     return data
 
@@ -448,7 +457,7 @@ class ContactList(CTCTModel):
     contact_ids = list(map(str, contacts.values_list('id', flat=True)))
     for i in range(0, len(contact_ids), CTCT_MAX):
       response = requests.post(
-        url=f'{self.BASE_URL}/activities/add_list_memberships',
+        url=f'{self.API_URL}/activities/add_list_memberships',
         headers=self.headers,
         json={
           'source': {
@@ -678,6 +687,7 @@ class Contact(CTCTModel):
     validate_email(self.email)
     return super().clean()
 
+  # TODO: Does this serialize PhoneNumber, StreetAddress etc?
   def serialize(self, method: str = 'POST') -> dict:
     """Serialize to CTCT object differently depending on PUT or POST method."""
 
@@ -732,7 +742,9 @@ class Contact(CTCTModel):
         'opt_out_date': to_dt(ctct_obj['email_address']['opt_out_date']),
       })
 
-    breakpoint()
+    if data['email'] == 'geoffrey.eisenbarth@gmail.com':
+      breakpoint()
+
     return data
 
   def ctct_create(self) -> dict:
@@ -823,7 +835,7 @@ class Contact(CTCTModel):
       return None
     else:
       response = requests.put(
-        url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}',
+        url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}',
         headers=self.headers,
         json=self.serialize(method='PUT'),
       )
@@ -895,6 +907,7 @@ class ContactNote(CTCTLocalModel):
 class ContactPhoneNumber(CTCTLocalModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
+  API_ID_LABEL = 'phone_number_id'
   API_BODY_FIELDS = (
     'kind',
     'phone_number',
@@ -936,6 +949,7 @@ class ContactPhoneNumber(CTCTLocalModel):
 class ContactStreetAddress(CTCTLocalModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
+  API_ID_LABEL = 'street_address_id'
   API_BODY_FIELDS = (
     'kind',
     'street',
@@ -1000,6 +1014,7 @@ class ContactStreetAddress(CTCTLocalModel):
 
 class ContactCustomField(CTCTLocalModel):
 
+  API_ID_LABEL = 'custom_field_id'
   API_MAX_NUM = 25
 
   contact = models.ForeignKey(
@@ -1187,7 +1202,7 @@ class EmailCampaign(CTCTModel):
 
     # Create EmailCampaign (and CampaignActivities) on CTCT servers
     response = requests.post(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}',
       headers=self.headers,
       json={
         'name': self.name,
@@ -1244,7 +1259,7 @@ class EmailCampaign(CTCTModel):
       while paginated:
 
         response = requests.get(
-          url=f'{self.BASE_URL}{endpoint}',
+          url=f'{self.API_URL}{endpoint}',
           headers=self.headers,
         )
         ctct_objs = self.raise_or_json(response)
@@ -1282,7 +1297,7 @@ class EmailCampaign(CTCTModel):
   def ctct_rename(self) -> dict:
     """Rename EmailCampaign on CTCT servers."""
     response = requests.patch(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}',
       headers=self.headers,
       json={'name': self.name},
     )
@@ -1458,7 +1473,7 @@ class CampaignActivity(CTCTModel):
   def ctct_send_preview(self, user) -> None:
     """Sends preview email for approval."""
     response = requests.post(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}/tests',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}/tests',
       headers=self.headers,
       json={
         'email_addresses': self.get_preview_recipients(),
@@ -1482,7 +1497,7 @@ class CampaignActivity(CTCTModel):
 
     # Set recipients on CTCT
     response = requests.put(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}',
       headers=self.headers,
       json=self.serialize(),
     )
@@ -1490,7 +1505,7 @@ class CampaignActivity(CTCTModel):
 
     # Then schedule the CampaignActivity
     response = requests.post(
-      url=f'{self.BASE_URL}{self.API_ENDPOINT}/{self.id}/schedules',
+      url=f'{self.API_URL}{self.API_ENDPOINT}/{self.id}/schedules',
       headers=self.headers,
       json={'scheduled_date': self.campaign.scheduled_datetime.isoformat()},
     )

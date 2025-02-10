@@ -11,6 +11,7 @@ from django_ctct.models import (
 )
 
 
+# TODO: would tqdm be helpful?
 class Command(BaseCommand):
   """Imports CTCT objects from CTCT servers.
 
@@ -35,7 +36,7 @@ class Command(BaseCommand):
   ]
   URL_CHECKS = {
     ContactList: '?include_membership_count=active',
-    Contact: '?include=custom_fields,list_memberships',
+    Contact: '?include=custom_fields,list_memberships,notes,phone_numbers,street_addresses'
   }
   LIST_KEYS = {
     ContactList: 'lists',
@@ -88,8 +89,7 @@ class Command(BaseCommand):
 
     paginated = True
     while paginated:
-
-      response = self.ctct_api_get(f'{Model.BASE_URL}{endpoint}')
+      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
       list_key = self.LIST_KEYS[Model]
       for ctct_obj in response[list_key]:
 
@@ -108,6 +108,8 @@ class Command(BaseCommand):
 
       try:
         endpoint = response.get('_links').get('next').get('href')
+        if endpoint.startswith(Model.API_VERSION):
+          endpoint = endpoint[len(Model.API_VERSION):]
       except AttributeError:
         paginated = False
 
@@ -132,7 +134,7 @@ class Command(BaseCommand):
 
     if Model is Contact:
       # Set ContactLists via ThroughModel
-      ThroughModel = Contact.lists.through
+      ThroughModel = Contact.list_memberships.through
       for contact in create_objs + update_objs:
         contactlists = ContactList.objects.filter(
           id__in=contact_lists[contact.id],
@@ -151,7 +153,7 @@ class Command(BaseCommand):
 
     query = Q(activities__role='primary_email')
     for campaign in EmailCampaign.objects.exclude(query):
-      url = f'{Model.BASE_URL}{EmailCampaign.API_ENDPOINT}/{campaign.id}'
+      url = f'{Model.API_URL}{EmailCampaign.API_ENDPOINT}/{campaign.id}'
       try:
         response = self.ctct_api_get(url)
       except Exception as e:
@@ -199,7 +201,7 @@ class Command(BaseCommand):
     paginated = True
     while paginated:
 
-      response = self.ctct_api_get(f'{Model.BASE_URL}{endpoint}')
+      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
       for ctct_obj in response['bulk_email_campaign_summaries']:
         obj = Model.from_ctct(ctct_obj, save=False)
         if obj._id:
@@ -233,7 +235,7 @@ class Command(BaseCommand):
     paginated = True
     while paginated:
 
-      response = self.ctct_api_get(f'{Model.BASE_URL}{endpoint}')
+      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
       for ctct_obj in response['contacts']:
         obj = Model.from_ctct(ctct_obj, save=False)
         if obj._id:
