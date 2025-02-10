@@ -17,8 +17,6 @@ for value in [
   'CTCT_REDIRECT_URI',
   'CTCT_FROM_NAME',
   'CTCT_FROM_EMAIL',
-  'CTCT_POST_MODEL',
-  'ADMINS',
 ]:
   if not hasattr(settings, value):
     message = (
