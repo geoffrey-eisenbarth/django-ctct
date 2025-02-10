@@ -316,7 +316,7 @@ class Command(BaseCommand):
     )
     self.stdout.write(message)
 
-  def _sync_optouts(self):
+  def _sync_opt_outs(self):
     """Fetches and syncs Contact opt outs."""
 
     Model = Contact
@@ -351,11 +351,11 @@ class Command(BaseCommand):
 
     update_count = Model.objects.bulk_update(
       update_objs,
-      fields=['optout', 'optout_at'],
+      fields=['opt_out', 'opt_out_date'],
       batch_size=500,
     )
     message = self.style.SUCCESS(
-      f'Synced optouts for {update_count} Contact instances.'
+      f'Synced opt outs for {update_count} Contact instances.'
     )
     self.stdout.write(message)
 
@@ -398,4 +398,4 @@ class Command(BaseCommand):
 
     question = 'Sync Contact opt-outs? (y/n): '
     if self.noinput or (input(question).lower()[0] == 'y'):
-      self._sync_optouts()
+      self._sync_opt_outs()

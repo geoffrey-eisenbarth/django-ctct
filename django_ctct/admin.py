@@ -114,7 +114,7 @@ class ContactListAdmin(admin.ModelAdmin):
   list_display = (
     'name',
     'membership',
-    'optouts',
+    'opt_outs',
     'created_at',
     'updated_at',
     'favorite',
@@ -130,9 +130,9 @@ class ContactListAdmin(admin.ModelAdmin):
     return obj.contacts.count()
   membership.short_description = _('Membership')
 
-  def optouts(self, obj: ContactList) -> int:
-    return obj.contacts.filter(optout=True).count()
-  optouts.short_description = _('Opt Outs')
+  def opt_outs(self, obj: ContactList) -> int:
+    return obj.contacts.filter(opt_out=True).count()
+  opt_outs.short_description = _('Opt Outs')
 
   # ChangeView
   form = ContactListForm
@@ -152,7 +152,7 @@ class ContactStatusFilter(admin.SimpleListFilter):
   STATUSES = (
     ('sync', _('Synced')),
     ('not_synced', _('Not Synced')),
-    ('optout', _('Opted Out')),
+    ('opt_out', _('Opted Out')),
   )
 
   title = 'CTCT Status'
@@ -174,8 +174,8 @@ class ContactStatusFilter(admin.SimpleListFilter):
       queryset = queryset.filter(id__isnull=False)
     elif self.value() == 'not_synced':
       queryset = queryset.filter(id__isnull=True)
-    elif self.value() == 'optout':
-      queryset = queryset.filter(optout=True)
+    elif self.value() == 'opt_out':
+      queryset = queryset.filter(opt_out=True)
 
     return queryset
 
@@ -244,7 +244,7 @@ class ContactAdmin(admin.ModelAdmin):
     if not obj.id:
       text = 'Not Synced'
       color = 'bad'
-    elif obj.optout:
+    elif obj.opt_out:
       text = 'Opted Out'
       color = 'warn'
     else:
@@ -272,7 +272,7 @@ class ContactAdmin(admin.ModelAdmin):
     ('CONTACT LISTS', {
       'fields': (
         'list_memberships',
-        ('optout', 'optout_at'),
+        ('opt_out', 'opt_out_date'),
       ),
     }),
     ('TIMESTAMPS', {
@@ -297,10 +297,10 @@ class ContactAdmin(admin.ModelAdmin):
     readonly_fields = [
       'created_at',
       'updated_at',
-      'optout',
-      'optout_at',
+      'opt_out',
+      'opt_out_date',
     ]
-    if getattr(obj, 'optout', False) and not request.user.is_superuser:
+    if getattr(obj, 'opt_out', False) and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
 
@@ -419,7 +419,7 @@ class EmailCampaignAdmin(ViewModelAdmin):
     'sends',
     'bounces',
     'clicks',
-    'optouts',
+    'opt_outs',
     'abuse',
   )
 

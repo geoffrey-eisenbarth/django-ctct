@@ -725,8 +725,8 @@ class Contact(CTCTModel):
 
     if ctct_obj['email_address']['permission_to_send'] == 'unsubscribed':
       data.update({
-        'optout': True,
-        'optout_at': to_dt(ctct_obj['email_address']['opt_out_date']),
+        'opt_out': True,
+        'opt_out_date': to_dt(ctct_obj['email_address']['opt_out_date']),
       })
     return data
 
@@ -810,7 +810,7 @@ class Contact(CTCTModel):
 
     """
 
-    if self.optout:
+    if self.opt_out:
       response = {}
     elif not self.list_memberships.exists():
       # CTCT requires that Contacts be a member of at least one ContactList
@@ -1114,7 +1114,7 @@ class EmailCampaign(CTCTModel):
     verbose_name=_('Forwards'),
     help_text=_('The total number of unique forwards'),
   )
-  optouts = models.IntegerField(
+  opt_outs = models.IntegerField(
     default=0,
     verbose_name=_('Opt Out'),
     help_text=_('The total number of people who unsubscribed'),
