@@ -1,8 +1,4 @@
 from argparse import ArgumentParser
-from datetime import date, timedelta
-import dateutil.parser as dparser
-from dateutil.parser import ParserError
-
 from ratelimit import limits, sleep_and_retry
 import requests
 from requests.exceptions import HTTPError
@@ -14,10 +10,7 @@ from django_ctct.models import (
   Token, CTCTModel, Contact, ContactList, EmailCampaign, CampaignActivity,
 )
 
-from www.posts.models import Post  # TODO
 
-
-# TODO: Some of this is TPG specific
 class Command(BaseCommand):
   """Imports CTCT objects from CTCT servers.
 
@@ -30,6 +23,9 @@ class Command(BaseCommand):
   """
 
   help = 'Syncs database CTCT objects with CTCT servers.'
+
+  CTCT_API_LIMIT_CALLS = 4   # Four calls in
+  CTCT_API_LIMIT_PERIOD = 1  # one second
 
   CTCT_MODELS = [
     ContactList,
@@ -48,29 +44,12 @@ class Command(BaseCommand):
     CampaignActivity: 'campaign_activities',
   }
 
-  # TODO: TPG
-  DUPLICATED_EMAILS = [
-    # For some reason, these email addresses are duplicated in CTCT
-    'rudnickbk@aol.com',
-    'rreesed@msn.com',
-  ]
-
   @sleep_and_retry
-  @limits(calls=4, period=1)
+  @limits(calls=CTCT_API_LIMIT_CALLS, period=CTCT_API_LIMIT_PERIOD)
   def ctct_api_get(self, url) -> dict:
-    """Extends `response.raise_for_status` to provide a better error report.
+    """Extends `response.raise_for_status` to provide a better error report."""
 
-    Notes
-    -----
-    We also utilize the `ratelimit` library to prevent more than four calls
-    per second, the limit imposed by CTCT API.
-
-    """
-
-    response = requests.get(
-      url=url,
-      headers={'Authorization': f"{self.token.type} {self.token.access_code}"},
-    )
+    response = self.session.get(url=url)
 
     try:
       response.raise_for_status()
@@ -92,69 +71,8 @@ class Command(BaseCommand):
 
     return response
 
-  def _get_post_from_name(self, name: str) -> Post:
-    """Fetches database Post based on EmailCampaign name."""
-
-    # Fetch known Post from "trouble-maker" EmailCampaigns
-    KNOWN_ISSUES = {
-      'COLUMN 2016-10-19': Post.objects.get(
-        title="Going once...",
-        publish_date=date(2020, 10, 19),
-      ),
-      'COLUMN 2019-01-02': None,
-      'COLUMN 2020-10-19': None,
-      'COLUMN 2016-05-04': None,
-    }
-    if name in KNOWN_ISSUES:
-      return KNOWN_ISSUES[name]
-
-    # Otherwise, we built a query based on the passed EmailCampaign name
-    query = Q()
-
-    category = name.split(' ')[0]
-    if category in dict(Post.CATEGORIES):
-      query &= Q(category=category)
-    else:
-      return None
-
-    publish_date = name.split(' ')[1]
-    try:
-      publish_date = dparser.parse(publish_date)
-    except ParserError:
-      return None
-    else:
-      # Take into account old Campaign names might have wrong dates
-      dt = timedelta(days=3)
-      query &= Q(publish_date__range=(publish_date - dt, publish_date + dt))
-
-    title = ' '.join(name.split(' ')[2:])
-    if 'COMP' in title:
-      # Newsletter COMP stats are not saved
-      return None
-    elif 'PAID' in title:
-      # Category and date are enough to find the Post
-      pass
-    elif title:
-      # Take into account Campaign title truncation
-      query &= Q(title__startswith=title[:20], title__endswith=title[-20:])
-
-    try:
-      post = Post.objects.get(query)
-    except Post.DoesNotExist:
-      # Post doesn't exist in database, return None
-      post = None
-    except Post.MultipleObjectsReturned:
-      # Possible duplicate Post or filtering issue
-      message = self.style.ERROR(
-        f'Multiple Post candidates for Campaign: {query}'
-      )
-      self.stdout.write(message)
-      post = None
-
-    return post
-
   def _sync_model(self, Model: CTCTModel):
-    """Fetches and syncs Contacts from CTCT with database."""
+    """Fetches and syncs Contacts from CTCT with Django's db."""
 
     if Model is Contact:
       contact_lists = {}
@@ -175,22 +93,11 @@ class Command(BaseCommand):
       list_key = self.LIST_KEYS[Model]
       for ctct_obj in response[list_key]:
 
-        if Model is EmailCampaign:
-          if ctct_obj['current_status'] == 'Removed':
-            continue
-          if post := self._get_post_from_name(ctct_obj['name']):
-            ctct_obj['post_id'] = post.id
-          else:
-            message = self.style.ERROR(
-              f"Could not find Post for {ctct_obj['name']} EmailCampaign."
-            )
-            self.stdout.write(message)
-            continue
+        if (Model is EmailCampaign) and (ctct_obj['current_status'] == 'Removed'):
+          continue
 
         obj = Model.from_ctct(ctct_obj, save=False)
-        if (Model is Contact) and (obj.email in self.DUPLICATED_EMAILS):
-          pass
-        elif obj._id:
+        if obj._id:
           update_objs.append(obj)
         else:
           create_objs.append(obj)
@@ -288,7 +195,7 @@ class Command(BaseCommand):
     Model = EmailCampaign
     update_objs = []
 
-    endpoint = '/v3/reports/summary_reports/email_campaign_summaries'
+    endpoint = '/reports/summary_reports/email_campaign_summaries'
     paginated = True
     while paginated:
 
@@ -322,16 +229,14 @@ class Command(BaseCommand):
     Model = Contact
     create_objs, update_objs = [], []
 
-    endpoint = '/v3/contacts?status=unsubscribed'
+    endpoint = '/contacts?status=unsubscribed'
     paginated = True
     while paginated:
 
       response = self.ctct_api_get(f'{Model.BASE_URL}{endpoint}')
       for ctct_obj in response['contacts']:
         obj = Model.from_ctct(ctct_obj, save=False)
-        if obj.email in self.DUPLICATED_EMAILS:
-          pass
-        elif obj._id:
+        if obj._id:
           update_objs.append(obj)
         else:
           create_objs.append(obj)
@@ -379,7 +284,12 @@ class Command(BaseCommand):
 
     self.noinput = kwargs['noinput']
     self.stats_only = kwargs['stats_only']
+
     self.token = Token.get()
+    self.session = requests.Session()
+    self.session.headers.update({
+      'Authorization': f"{self.token.type} {self.token.access_code}"
+    })
 
     if self.stats_only:
       self.CTCT_MODELS = []

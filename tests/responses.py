@@ -2,11 +2,10 @@ from typing import Literal, Optional
 
 import requests_mock
 
+from django_ctct.models import CTCTModel
+
 
 class MockConstantContactAPI:
-
-  base_url = 'https://api.constantcontact.com'
-  version = '/v3'
 
   def __init__(self):
     self.mocker = requests_mock.Mocker()
@@ -24,7 +23,7 @@ class MockConstantContactAPI:
     status_code: int,
     id: Optional[str] = None,
   ):
-    url = f'{self.base_url}{self.version}{endpoint}'
+    url = f'{CTCTModel.BASE_URL}{endpoint}'
     if id is not None:
       url = f'{url}/{id}'
 

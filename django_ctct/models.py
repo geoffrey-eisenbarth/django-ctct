@@ -108,7 +108,7 @@ class SerializerMixin:
 class CTCTModel(SerializerMixin, models.Model):
   """Common CTCT model methods and properties."""
 
-  BASE_URL = 'https://api.cc.email'
+  BASE_URL = 'https://api.cc.email/v3'
 
   save_to_ctct: Optional[Literal['sync', 'async']] = 'async'
 
@@ -266,6 +266,8 @@ class Token(models.Model):
 
   """
 
+  CTCT_AUTH_URL = 'https://authz.constantcontact.com/oauth2/default/v1/token'
+
   access_code = models.TextField(
     verbose_name=_('Access Code'),
   )
@@ -296,6 +298,7 @@ class Token(models.Model):
   def decode(self) -> dict:
     """Decode JWT Token, which also verifies that it hasn't expired."""
 
+    # TODO: split out URL
     client = jwt.PyJWKClient(
       'https://identity.constantcontact.com/'
       'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
@@ -305,7 +308,7 @@ class Token(models.Model):
       self.access_code,
       signing_key.key,
       algorithms=['RS256'],
-      audience='https://api.cc.email/v3',
+      audience=f'{CTCTModel.BASE_URL}',
     )
     return data
 
@@ -313,7 +316,7 @@ class Token(models.Model):
     """Obtain a new Token from CTCT using the refresh code."""
 
     response = requests.post(
-      url='https://authz.constantcontact.com/oauth2/default/v1/token',
+      url=self.CTCT_AUTH_URL,
       auth=(settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY),
       data={
         'refresh_token': self.refresh_code,
@@ -394,7 +397,7 @@ class Token(models.Model):
 class ContactList(CTCTModel):
   """Django implementation of a CTCT Contact List."""
 
-  API_ENDPOINT = '/v3/contact_lists'
+  API_ENDPOINT = '/contact_lists'
   API_ID_LABEL = 'list_id'
   API_BODY_FIELDS = (
     'name',
@@ -445,7 +448,7 @@ class ContactList(CTCTModel):
     contact_ids = list(map(str, contacts.values_list('id', flat=True)))
     for i in range(0, len(contact_ids), CTCT_MAX):
       response = requests.post(
-        url=f'{self.BASE_URL}/v3/activities/add_list_memberships',
+        url=f'{self.BASE_URL}/activities/add_list_memberships',
         headers=self.headers,
         json={
           'source': {
@@ -462,7 +465,7 @@ class ContactList(CTCTModel):
 class CustomField(CTCTModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
-  API_ENDPOINT = '/v3/contact_custom_fields'
+  API_ENDPOINT = '/contact_custom_fields'
   API_ID_LABEL = 'custom_field_id'
   API_BODY_FIELDS = (
     'label',
@@ -522,7 +525,7 @@ def ctct_delete_signal(sender, instance, **kwargs) -> None:
 class Contact(CTCTModel):
   """Django implementation of a CTCT Contact."""
 
-  API_ENDPOINT = '/v3/contacts'
+  API_ENDPOINT = '/contacts'
   API_ID_LABEL = 'contact_id'
   API_BODY_FIELDS = (
     'first_name',
@@ -728,6 +731,8 @@ class Contact(CTCTModel):
         'opt_out': True,
         'opt_out_date': to_dt(ctct_obj['email_address']['opt_out_date']),
       })
+
+    breakpoint()
     return data
 
   def ctct_create(self) -> dict:
@@ -1042,7 +1047,7 @@ class ContactCustomField(CTCTLocalModel):
 class EmailCampaign(CTCTModel):
   """Django implementation of a CTCT EmailCampaign."""
 
-  API_ENDPOINT = '/v3/emails'
+  API_ENDPOINT = '/emails'
   API_ID_LABEL = 'campaign_id'
 
   STATUSES = (
@@ -1298,7 +1303,7 @@ class CampaignActivity(CTCTModel):
 
   """
 
-  API_ENDPOINT = '/v3/emails/activities'
+  API_ENDPOINT = '/emails/activities'
   API_ID_LABEL = 'campaign_activity_id'
   API_BODY_FIELDS = (
     'format_type',
