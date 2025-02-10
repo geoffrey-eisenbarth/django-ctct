@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    'django_rq',
     'django_ctct',
 ]
 
@@ -122,3 +124,37 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# Installed apps
+RQ_QUEUES = {
+  'default': {
+    'HOST': '127.0.0.1',
+    'PORT': '6379',
+    'DB': '0',
+  },
+}
+RQ_SHOW_ADMIN_LINK = True
+
+
+##################
+# LOCAL SETTINGS #
+##################
+
+# Allow any settings to be defined in local_settings.py, which should be
+# ignored in version control system, allowing for settings to be defined
+# per machine.
+
+# Instead of doing "from .local_settings import *", we use ``exec`` so that
+# local_settings has full access to everything defined in this module.
+# Also force into sys.modules so it's visible to Django's autoreload.
+
+f = Path(BASE_DIR, 'project', 'local_settings.py')
+if f.exists():
+  import sys
+  import imp
+  module_name = 'project.local_settings'
+  module = imp.new_module(module_name)
+  module.__file__ = f
+  sys.modules[module_name] = module
+  exec(open(f, 'rb').read())
