@@ -31,7 +31,8 @@ from django.urls import path, include
 
 urlpatterns = [
   path('admin/', admin.site.urls),
-  path('ctct/', include('django_ctct.urls')),
+  path('django-rq/', include('django_rq.urls')),  # Optional
+  path('django-ctct/', include('django_ctct.urls')),
   # ... other URL patterns
 ]
 ```
@@ -79,6 +80,9 @@ Then, run the RQ worker:
 python manage.py rqworker ctct  # Or python manage.py rqworker for all queues
 ```
 
+To view tasks in Django admin, you'll need to add `django-rq` to your `urls.py` as mentioned above.
+
+```Python
 ## Usage
 
 Describe how to use your app.  Provide examples of common use cases.  For example:
