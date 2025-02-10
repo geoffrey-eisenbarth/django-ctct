@@ -155,6 +155,6 @@ if f.exists():
   import imp
   module_name = 'project.local_settings'
   module = imp.new_module(module_name)
-  module.__file__ = f
+  module.__file__ = str(f)
   sys.modules[module_name] = module
   exec(open(f, 'rb').read())
