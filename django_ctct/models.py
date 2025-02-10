@@ -26,10 +26,10 @@ from phonenumber_field.modelfields import PhoneNumberField
 
 from django_ctct.utils import to_dt
 
-# from django_ctct.tasks import (
-#   ctct_save_job, ctct_delete_job, ctct_rename_job,
-#   ctct_update_lists_job, ctct_add_list_memberships_job,
-# )
+from django_ctct.tasks import (
+  ctct_save_job, ctct_delete_job, ctct_rename_job,
+  ctct_update_lists_job, ctct_add_list_memberships_job,
+)
 
 
 class SerializerMixin:
@@ -345,7 +345,7 @@ class Token(models.Model):
     if not token:
       message = (
         "No tokens in the database yet. You must "
-        f"visit {reverse('ctct_auth')} and sign in to "
+        f"visit {reverse('ctct:auth')} and sign in to "
         "ConstantContact to create the initial token."
       )
       raise ValueError(message)
