@@ -184,6 +184,8 @@ class ContactStreetAddressInline(admin.TabularInline):
   """Inline for adding ContactStreetAddresses to a Contact."""
 
   model = ContactStreetAddress
+  exclude = ('id', )
+
   extra = 0
   max_num = ContactStreetAddress.API_MAX_NUM
 
@@ -192,6 +194,8 @@ class ContactPhoneNumberInline(admin.TabularInline):
   """Inline for adding ContactPhoneNumbers to a Contact."""
 
   model = ContactPhoneNumber
+  exclude = ('id', )
+
   extra = 0
   max_num = ContactPhoneNumber.API_MAX_NUM
 
@@ -200,6 +204,8 @@ class ContactNoteInline(admin.TabularInline):
   """Inline for adding ContactNotes to a Contact."""
 
   model = ContactNote
+  exclude = ('id', )
+
   extra = 0
   max_num = ContactNote.API_MAX_NUM
 
@@ -391,22 +397,28 @@ class CampaignActivityInline(admin.StackedInline):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
+  exclude = ('id', )
+
   extra = 1
   max_num = 1
 
-  def formfield_for_dbfield(
-    self,
-    db_field: ModelField,
-    request: HttpRequest,
-  ) -> FormField:
-    formfield = {
+  class Meta:
+    widgets = {
       'html_content': forms.Textarea,
-    }.get(db_field.name, super().formfield_for_dbfield(db_field, request))
-    return formfield
+    }
+  #def formfield_for_dbfield(
+  #  self,
+  #  db_field: ModelField,
+  #  request: HttpRequest,
+  #) -> FormField:
+  #  formfield = {
+  #    'html_content': forms.Textarea,
+  #  }.get(db_field.name, super().formfield_for_dbfield(db_field, request))
+  #  return formfield
 
 
 @admin.register(EmailCampaign)
-class EmailCampaignAdmin(ViewModelAdmin):
+class EmailCampaignAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT EmailCampaigns."""
 
   # ListView
@@ -434,6 +446,28 @@ class EmailCampaignAdmin(ViewModelAdmin):
   open_rate.short_description = _('Open Rate')
 
   # ChangeView
+  fieldsets = (
+    (None, {
+      'fields': (
+      ),
+    }),
+    ('ANALYTICS', {
+      'fields': (
+        'sends', 'opens', 'clicks', 'forwards',
+        'opt_outs', 'abuse', 'bounces', 'not_opened',
+      ),
+    }),
+    ('INTERNAL', {
+      'fields': (
+      ),
+    }),
+  )
+  readonly_fields = (
+    'sends', 'opens', 'clicks', 'forwards',
+    'opt_outs', 'abuse', 'bounces', 'not_opened',
+  )
+
+
   inlines = (CampaignActivityInline, )
 
   def save_model(
