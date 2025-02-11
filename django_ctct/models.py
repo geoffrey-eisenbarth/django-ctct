@@ -275,7 +275,11 @@ class Token(models.Model):
 
   """
 
-  CTCT_AUTH_URL = 'https://authz.constantcontact.com/oauth2/default/v1/token'
+  API_AUTH_URL = 'https://authz.constantcontact.com/oauth2/default/v1/token'
+  API_JWKS_URL = (
+    'https://identity.constantcontact.com/'
+    'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
+  )
 
   access_code = models.TextField(
     verbose_name=_('Access Code'),
@@ -307,11 +311,7 @@ class Token(models.Model):
   def decode(self) -> dict:
     """Decode JWT Token, which also verifies that it hasn't expired."""
 
-    # TODO: split out URL
-    client = jwt.PyJWKClient(
-      'https://identity.constantcontact.com/'
-      'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
-    )
+    client = jwt.PyJWKClient(self.API_JWKS_URL)
     signing_key = client.get_signing_key_from_jwt(self.access_code)
     data = jwt.decode(
       self.access_code,
@@ -325,7 +325,7 @@ class Token(models.Model):
     """Obtain a new Token from CTCT using the refresh code."""
 
     response = requests.post(
-      url=self.CTCT_AUTH_URL,
+      url=self.API_AUTH_URL,
       auth=(settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY),
       data={
         'refresh_token': self.refresh_code,
@@ -451,17 +451,17 @@ class ContactList(CTCTModel):
   ) -> list(dict):
     """Adds multiple Contacts to a single ContactList."""
 
-    CTCT_MAX = 500
+    API_MAX = 500
 
     responses = []
     contact_ids = list(map(str, contacts.values_list('id', flat=True)))
-    for i in range(0, len(contact_ids), CTCT_MAX):
+    for i in range(0, len(contact_ids), API_MAX):
       response = requests.post(
         url=f'{self.API_URL}/activities/add_list_memberships',
         headers=self.headers,
         json={
           'source': {
-            'contact_ids': contact_ids[i:i + CTCT_MAX],
+            'contact_ids': contact_ids[i:i + API_MAX],
           },
           'list_ids': [str(self.id)],
         },
