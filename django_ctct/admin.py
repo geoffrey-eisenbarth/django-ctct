@@ -230,7 +230,6 @@ class ContactAdmin(admin.ModelAdmin):
     'last_name',
     'company_name',
     'job_title',
-    'city',
   )
 
   list_display = (
