@@ -96,19 +96,27 @@ class SerializerMixin:
       else:
         django_obj = cls()
 
-    # TODO: How to save related objects like ContactPhoneNumber?
-    related_objs = {}
+    many_to_many, reverse_fk = {}, {}
     for field_name, value in data.items():
       if isinstance(value, QuerySet):
         # Defer related objects until object is saved
-        related_objs[field_name] = value
+        many_to_many[field_name] = value
+      elif isinstance(value, list):
+        # Defer related objects until object is saved
+        reverse_fk[field_name] = value
       else:
         setattr(django_obj, field_name, value)
 
     if save:
       django_obj.save(save_to_ctct=False)
-      for field_name, queryset in related_objs.items():
+      for field_name, queryset in many_to_many.items():
         getattr(django_obj, field_name).set(queryset)
+      for field_name, related_objs in reverse_fk.items():
+        for related_obj in related_objs:
+          # TODO: Use bulk_create or update?
+          # TODO: Hard-coded .contact
+          related_obj.contact = django_obj.id
+          related_obj.save()
 
     return django_obj
 
@@ -742,9 +750,17 @@ class Contact(CTCTModel):
         'opt_out_date': to_dt(ctct_obj['email_address']['opt_out_date']),
       })
 
-    if data['email'] == 'geoffrey.eisenbarth@gmail.com':
-      breakpoint()
-
+    # Deserialize related objects
+    # TODO: Why not list_memberships?
+    RelatedModel = {
+      obj.related_name: obj.related_model
+      for obj in cls._meta.related_objects
+    }
+    for field_name in ['phone_numbers', 'street_addresses', 'notes']:
+      data[field_name] = [
+        RelatedModel[field_name].deserialize(ctct_related_obj)
+        for ctct_related_obj in ctct_obj[field_name]
+      ]
     return data
 
   def ctct_create(self) -> dict:
@@ -943,7 +959,7 @@ class ContactPhoneNumber(CTCTLocalModel):
     verbose_name_plural = _('Phone Numbers')
 
   def __str__(self) -> str:
-    return f'{self.kind}: {self.phone_number}'
+    return f'{self.get_kind_display()}: {self.phone_number}'
 
 
 class ContactStreetAddress(CTCTLocalModel):
@@ -1009,7 +1025,7 @@ class ContactStreetAddress(CTCTLocalModel):
     verbose_name_plural = _('Street Addresses')
 
   def __str__(self) -> str:
-    return f'{self.kind}: {self.street}, {self.city} {self.state}'
+    return f'{self.get_kind_display()}: {self.street}, {self.city} {self.state}'
 
 
 class ContactCustomField(CTCTLocalModel):
