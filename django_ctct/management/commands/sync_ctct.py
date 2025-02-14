@@ -1,4 +1,4 @@
-from argparse import ArgumentParser
+arom argparse import ArgumentParser
 from ratelimit import limits, sleep_and_retry
 import requests
 from requests.exceptions import HTTPError
@@ -34,10 +34,6 @@ class Command(BaseCommand):
     EmailCampaign,
     CampaignActivity,
   ]
-  URL_CHECKS = {
-    ContactList: '?include_membership_count=active',
-    Contact: '?include=custom_fields,list_memberships,notes,phone_numbers,street_addresses'
-  }
   LIST_KEYS = {
     ContactList: 'lists',
     Contact: 'contacts',
@@ -47,7 +43,7 @@ class Command(BaseCommand):
 
   @sleep_and_retry
   @limits(calls=CTCT_API_LIMIT_CALLS, period=CTCT_API_LIMIT_PERIOD)
-  def ctct_api_get(self, url) -> dict:
+  def ctct_api_get(self, url: str) -> dict:
     """Extends `response.raise_for_status` to provide a better error report."""
 
     response = self.session.get(url=url)
@@ -83,33 +79,31 @@ class Command(BaseCommand):
     create_objs, update_objs = [], []
 
     endpoint = Model.API_ENDPOINT
-    if check := self.URL_CHECKS.get(Model):
-      if check not in endpoint:
-        endpoint += check
 
     paginated = True
     while paginated:
-      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
+      response = self.ctct_api_get(
+        url=Model().get_api_url(method='GET', endpoint=endpoint)
+      )
       list_key = self.LIST_KEYS[Model]
       for ctct_obj in response[list_key]:
 
         if (Model is EmailCampaign) and (ctct_obj['current_status'] == 'Removed'):
           continue
 
-        obj = Model.from_ctct(ctct_obj, save=False)
-        if obj._id:
+        obj = Model.from_api(ctct_obj, save=False)
+        if obj.pk:
           update_objs.append(obj)
         else:
           create_objs.append(obj)
 
         if Model is Contact:
           # Grab ContactList information for later
-          contact_lists[obj.id] = ctct_obj['list_memberships']
+          contact_lists[obj.api_id] = ctct_obj['list_memberships']
+          # TODO: Add phone_numbers etc here?
 
       try:
         endpoint = response.get('_links').get('next').get('href')
-        if endpoint.startswith(Model.API_VERSION):
-          endpoint = endpoint[len(Model.API_VERSION):]
       except AttributeError:
         paginated = False
 
@@ -123,12 +117,12 @@ class Command(BaseCommand):
 
     update_count = Model.objects.bulk_update(
       update_objs,
-      fields=[f.name for f in Model._meta.fields if f.name != '_id'],
+      fields=[f.name for f in Model._meta.fields if not f.primary_key]
       batch_size=500,
     )
     if update_count:
       message = self.style.SUCCESS(
-        f'Synced {update_count} {Model.__name__} instances.'
+a       f'Synced {update_count} {Model.__name__} instances.'
       )
       self.stdout.write(message)
 
@@ -137,7 +131,7 @@ class Command(BaseCommand):
       ThroughModel = Contact.list_memberships.through
       for contact in create_objs + update_objs:
         contactlists = ContactList.objects.filter(
-          id__in=contact_lists[contact.id],
+          api_id__in=contact_lists[contact.api_id],
         )
         for contactlist in contactlists:
           ThroughModel.objects.get_or_create(
@@ -153,7 +147,7 @@ class Command(BaseCommand):
 
     query = Q(activities__role='primary_email')
     for campaign in EmailCampaign.objects.exclude(query):
-      url = f'{Model.API_URL}{EmailCampaign.API_ENDPOINT}/{campaign.id}'
+      url = campaign.get_api_url(method='GET')
       try:
         response = self.ctct_api_get(url)
       except Exception as e:
@@ -165,9 +159,9 @@ class Command(BaseCommand):
       else:
         for ctct_obj in response['campaign_activities']:
           if ctct_obj['role'] == 'primary_email':
-            obj = Model.from_ctct(ctct_obj, save=False)
+            obj = Model.from_api(ctct_obj, save=False)
             obj.campaign = campaign
-            if obj._id:
+            if obj.pk:
               update_objs.append(obj)
             else:
               create_objs.append(obj)
@@ -182,7 +176,7 @@ class Command(BaseCommand):
 
     update_count = Model.objects.bulk_update(
       update_objs,
-      fields=[f.name for f in Model._meta.fields if f.name != '_id'],
+      fields=[f.name for f in Model._meta.fields if not f.primary_key],
       batch_size=500,
     )
     if update_count:
@@ -201,10 +195,12 @@ class Command(BaseCommand):
     paginated = True
     while paginated:
 
-      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
+      response = self.ctct_api_get(
+        url=Model().get_api_url(method='GET', endpoint=endpoint)
+      )
       for ctct_obj in response['bulk_email_campaign_summaries']:
-        obj = Model.from_ctct(ctct_obj, save=False)
-        if obj._id:
+        obj = Model.from_api(ctct_obj, save=False)
+        if obj.pk:
           update_objs.append(obj)
         else:
           continue
@@ -217,7 +213,7 @@ class Command(BaseCommand):
     # Bulk update
     update_count = Model.objects.bulk_update(
       update_objs,
-      fields=[f.name for f in Model._meta.fields if f.name != '_id'],
+      fields=[f.name for f in Model._meta.fields if not f.primary_key],
       batch_size=500,
     )
     message = self.style.SUCCESS(
@@ -235,10 +231,12 @@ class Command(BaseCommand):
     paginated = True
     while paginated:
 
-      response = self.ctct_api_get(f'{Model.API_URL}{endpoint}')
+      response = self.ctct_api_get(
+        url=Model().get_api_url(method='GET', endpoint=endpoint)
+      )
       for ctct_obj in response['contacts']:
-        obj = Model.from_ctct(ctct_obj, save=False)
-        if obj._id:
+        obj = Model.from_api(ctct_obj, save=False)
+        if obj.pk:
           update_objs.append(obj)
         else:
           create_objs.append(obj)

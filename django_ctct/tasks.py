@@ -25,7 +25,7 @@ use `bulk_create` or `bulk_update`.
 
 @job
 def ctct_save_job(obj: 'CTCTModel') -> Optional[dict]:
-  if obj._id:
+  if obj.pk:
     ctct_obj = obj.ctct_save()
 
     # Update locally
@@ -33,8 +33,8 @@ def ctct_save_job(obj: 'CTCTModel') -> Optional[dict]:
       # CampaignActivity.ctct_save addresses this
       pass
     elif ctct_obj:
-      model = obj._meta.model
-      obj = model.from_ctct(ctct_obj, save=True)
+      Model = obj._meta.model
+      obj = Model.from_api(ctct_obj, save=True)
 
     return ctct_obj
   else:
@@ -72,7 +72,7 @@ def ctct_update_lists_job(contact: 'Contact') -> None:
 
   """
 
-  if contact.id is not None:
+  if contact.api_id is not None:
     sleep(60 * 1)  # 1 minute
     contact.ctct_update_lists()
 

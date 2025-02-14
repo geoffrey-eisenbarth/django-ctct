@@ -122,7 +122,7 @@ class ContactListAdmin(admin.ModelAdmin):
   )
 
   def synced(self, obj: ContactList) -> bool:
-    return bool(obj.id)
+    return bool(obj.api_id)
   synced.boolean = True
   synced.short_description = _('Synced')
 
@@ -171,9 +171,9 @@ class ContactStatusFilter(admin.SimpleListFilter):
     queryset: QuerySet,
   ) -> QuerySet[Contact]:
     if self.value() == 'sync':
-      queryset = queryset.filter(id__isnull=False)
+      queryset = queryset.filter(api_id__isnull=False)
     elif self.value() == 'not_synced':
-      queryset = queryset.filter(id__isnull=True)
+      queryset = queryset.filter(api_id__isnull=True)
     elif self.value() == 'opt_out':
       queryset = queryset.filter(opt_out=True)
 
@@ -184,7 +184,7 @@ class ContactStreetAddressInline(admin.TabularInline):
   """Inline for adding ContactStreetAddresses to a Contact."""
 
   model = ContactStreetAddress
-  exclude = ('id', )
+  exclude = ('api_id', )
 
   extra = 0
   max_num = ContactStreetAddress.API_MAX_NUM
@@ -194,7 +194,7 @@ class ContactPhoneNumberInline(admin.TabularInline):
   """Inline for adding ContactPhoneNumbers to a Contact."""
 
   model = ContactPhoneNumber
-  exclude = ('id', )
+  exclude = ('api_id', )
 
   extra = 0
   max_num = ContactPhoneNumber.API_MAX_NUM
@@ -204,7 +204,7 @@ class ContactNoteInline(admin.TabularInline):
   """Inline for adding ContactNotes to a Contact."""
 
   model = ContactNote
-  exclude = ('id', )
+  exclude = ('api_id', )
 
   extra = 0
   max_num = ContactNote.API_MAX_NUM
@@ -246,7 +246,7 @@ class ContactAdmin(admin.ModelAdmin):
   empty_value_display = '(None)'
 
   def ctct(self, obj: Contact) -> str:
-    if not obj.id:
+    if not obj.api_id:
       text = 'Not Synced'
       color = 'bad'
     elif obj.opt_out:
@@ -396,7 +396,7 @@ class CampaignActivityInline(admin.StackedInline):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
-  exclude = ('id', )
+  exclude = ('api_id', )
 
   extra = 1
   max_num = 1

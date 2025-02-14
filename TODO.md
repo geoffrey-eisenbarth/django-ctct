@@ -1,3 +1,6 @@
+* figure out from_api()
+
+
 * grep -rl `\.post`, `posts_post_change`, and `posts\.`
 * grep -rl `accounts\.`
 * Figure out .html_content()
