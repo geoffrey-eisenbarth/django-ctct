@@ -131,7 +131,7 @@ class ContactListAdmin(admin.ModelAdmin):
   membership.short_description = _('Membership')
 
   def opt_outs(self, obj: ContactList) -> int:
-    return obj.contacts.filter(opt_out=True).count()
+    return obj.contacts.exclude(opt_out_source='').count()
   opt_outs.short_description = _('Opt Outs')
 
   # ChangeView
@@ -152,7 +152,7 @@ class ContactStatusFilter(admin.SimpleListFilter):
   STATUSES = (
     ('sync', _('Synced')),
     ('not_synced', _('Not Synced')),
-    ('opt_out', _('Opted Out')),
+    ('opted_out', _('Opted Out')),
   )
 
   title = 'CTCT Status'
@@ -174,8 +174,8 @@ class ContactStatusFilter(admin.SimpleListFilter):
       queryset = queryset.filter(api_id__isnull=False)
     elif self.value() == 'not_synced':
       queryset = queryset.filter(api_id__isnull=True)
-    elif self.value() == 'opt_out':
-      queryset = queryset.filter(opt_out=True)
+    elif self.value() == 'opted_out':
+      queryset = queryset.exclude(opt_out_source='')
 
     return queryset
 
@@ -187,7 +187,7 @@ class ContactStreetAddressInline(admin.TabularInline):
   exclude = ('api_id', )
 
   extra = 0
-  max_num = ContactStreetAddress.API_MAX_NUM
+  max_num = Contact.API_MAX_STREET_ADDRESSES
 
 
 class ContactPhoneNumberInline(admin.TabularInline):
@@ -197,7 +197,7 @@ class ContactPhoneNumberInline(admin.TabularInline):
   exclude = ('api_id', )
 
   extra = 0
-  max_num = ContactPhoneNumber.API_MAX_NUM
+  max_num = Contact.API_MAX_PHONE_NUMBERS
 
 
 class ContactNoteInline(admin.TabularInline):
@@ -207,7 +207,7 @@ class ContactNoteInline(admin.TabularInline):
   exclude = ('api_id', )
 
   extra = 0
-  max_num = ContactNote.API_MAX_NUM
+  max_num = Contact.API_MAX_NOTES
 
   readonly_fields = ['author', 'created_at']
 
@@ -249,7 +249,7 @@ class ContactAdmin(admin.ModelAdmin):
     if not obj.api_id:
       text = 'Not Synced'
       color = 'bad'
-    elif obj.opt_out:
+    elif obj.opted_out:
       text = 'Opted Out'
       color = 'warn'
     else:
@@ -277,7 +277,7 @@ class ContactAdmin(admin.ModelAdmin):
     ('CONTACT LISTS', {
       'fields': (
         'list_memberships',
-        ('opt_out', 'opt_out_date'),
+        ('opt_out_source', 'opt_out_date'),
       ),
     }),
     ('TIMESTAMPS', {
@@ -302,10 +302,10 @@ class ContactAdmin(admin.ModelAdmin):
     readonly_fields = [
       'created_at',
       'updated_at',
-      'opt_out',
+      'opt_out_source',
       'opt_out_date',
     ]
-    if getattr(obj, 'opt_out', False) and not request.user.is_superuser:
+    if getattr(obj, 'opted_out', False) and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
 
