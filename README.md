@@ -50,7 +50,11 @@ CTCT_FROM_EMAIL = "YOUR_EMAIL_ADDRESS"
 
 Important:  Store your API credentials securely.  Avoid committing them directly to your version control repository.
 
-4) **RQ Configuration (Optional, for Asynchronous Tasks)**:
+4) **Other Settings:**
+
+You'll want to set `settings.PHONENUMBER_DEFAULT_REGION` in order for `django-phonenumber-field` to work properly.
+
+5) **RQ Configuration (Optional, for Asynchronous Tasks)**:
 
 If you want to use `django-rq` for asynchronous tasks (recommended for API calls that might take a while), configure it in your `settings.py`:
 
@@ -82,7 +86,6 @@ python manage.py rqworker ctct  # Or python manage.py rqworker for all queues
 
 To view tasks in Django admin, you'll need to add `django-rq` to your `urls.py` as mentioned above.
 
-```Python
 ## Usage
 
 Describe how to use your app.  Provide examples of common use cases.  For example:
