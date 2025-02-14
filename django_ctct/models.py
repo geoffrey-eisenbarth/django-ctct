@@ -47,11 +47,8 @@ class APIManager(models.Manager):
   TS_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 
   def setup(self) -> None:
-    self.token = Token.get()
     self.session = requests.Session()
-    self.session.headers.update({
-      'Authorization': f"{self.token.type} {self.token.access_code}"
-    })
+    self.session.headers.update(Token.get().authorization_header)
 
   def serialize(self, obj: Model) -> dict:
     """Convert from Django object to API request body."""
@@ -510,6 +507,9 @@ class Token(Model):
 
     return token
 
+  @property
+  def authorization_header(self) -> dict:
+    return {'Authorization': f"{self.type} {self.access_code}"}
 
 # TODO: ctct_add_list_memberships
 class ContactList(CTCTModel):
