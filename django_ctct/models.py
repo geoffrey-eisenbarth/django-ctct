@@ -6,6 +6,7 @@ from typing import Literal, Optional, Self
 
 import jwt
 from ratelimit import limits, sleep_and_retry
+import re
 import requests
 from requests.exceptions import HTTPError
 from requests.models import Response
@@ -828,16 +829,16 @@ class Contact(CTCTModel):
 
   @classmethod
   def clean_remote_email(cls, data: dict) -> str:
-    email_address = data.pop('email_address')
-    return email_address['address'].lower()
+    return data['email_address']['address'].lower()
 
   @classmethod
   def clean_remote_opt_out_source(cls, data: dict) -> str:
-    return data['email_address']['opt_out_source']
+    return data['email_address'].get('opt_out_source', '')
 
   @classmethod
-  def clean_remote_opt_out_date(cls, data: dict) -> dt.datetime:
-    return to_dt(data['email_address']['opt_out_date'])
+  def clean_remote_opt_out_date(cls, data: dict) -> Optional[dt.datetime]:
+    if opt_out_date := data['email_address'].get('opt_out_date'):
+      return to_dt(opt_out_date)
 
   def serialize(self, data: dict) -> dict:
     data['email_address'] = {
@@ -1002,6 +1003,7 @@ class ContactPhoneNumber(CTCTLocalModel):
     'phone_number',
   )
 
+  MISSING_NUMBER = '000-000-0000'
   KINDS = (
     ('home', 'Home'),
     ('work', 'Work'),
@@ -1047,8 +1049,13 @@ class ContactPhoneNumber(CTCTLocalModel):
     return f'[{self.get_kind_display()}] {self.phone_number}'
 
   @classmethod
-  def clean_remote_phone_number(cls, data: dict) -> PhoneNumber:
-    return PhoneNumber.from_string(data['phone_number'])
+  def clean_remote_phone_number(cls, data: dict) -> Optional[PhoneNumber]:
+    numbers = r'\d+'
+    if phone_number := ''.join(re.findall(numbers, data['phone_number'])):
+      phone_number = PhoneNumber.from_string(phone_number)
+    else:
+      phone_number = PhoneNumber.from_string(cls.MISSING_NUMBER)
+    return phone_number
 
 
 # DONE
@@ -1134,24 +1141,28 @@ class ContactStreetAddress(CTCTLocalModel):
     return f'[{self.get_kind_display()}] {address}'
 
   @classmethod
+  def clean_remote_string(cls, s: str) -> str:
+    return s.replace('\n', ' ').replace('\t', ' ').strip()
+
+  @classmethod
   def clean_remote_street(cls, data: dict) -> str:
-    return data['street'].strip()
+    return cls.clean_remote_string(data.get('street', ''))
 
   @classmethod
   def clean_remote_city(cls, data: dict) -> str:
-    return data['city'].strip()
+    return cls.clean_remote_string(data.get('city', ''))
 
   @classmethod
   def clean_remote_state(cls, data: dict) -> str:
-    return data['state'].strip().upper()
+    return cls.clean_remote_string(data.get('state', ''))
 
   @classmethod
   def clean_remote_postal_code(cls, data: dict) -> str:
-    return data['postal_code'].strip()
+    return cls.clean_remote_string(data.get('postal_code', ''))
 
   @classmethod
   def clean_remote_country(cls, data: dict) -> str:
-    return data['country'].strip()
+    return cls.clean_remote_string(data.get('country', ''))
 
 
 # DONE
