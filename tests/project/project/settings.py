@@ -127,6 +127,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # Installed apps
+PHONENUMBER_DEFAULT_REGION = 'US'
+
 RQ_QUEUES = {
   'default': {
     'HOST': '127.0.0.1',
