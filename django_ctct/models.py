@@ -153,8 +153,8 @@ class APIManager(models.Manager):
 
     Notes
     -----
-    In the case of ManyToManyFields, we typically just return a list of
-    `api_id`s, and create ThroughModel instances.
+    In the case of ManyToManyFields, we just return a list of `api_id`s to
+    help create ThroughModel instances.
 
     """
 
@@ -165,15 +165,26 @@ class APIManager(models.Manager):
 
       if related_data := data.pop(field.name):
 
-        if all(isinstance(_, str) for _ in related_data):
-          # ManyToManyField, just keep api_ids
-          related_objs[field.related_model] = related_data
-        elif all(isinstance(_, dict) for _ in related_data):
+        if all(isinstance(_, dict) for _ in related_data):
           # Add in the parent object's `api_id`
           parent = {field.remote_field.name: data['api_id']}
           deserialize = field.related_model.remote.deserialize
           objs = [deserialize(datum | parent)[0] for datum in related_data]
           related_objs[field.related_model] = objs
+        elif all(isinstance(_, str) for _ in related_data):
+          # TODO API Specific: What if api_ids were ints instead of uuids?
+          # ManyToManyField, make a list of "through model" instances
+          ThroughModel = getattr(self.model, field.name).through
+          model_attname = f'{field.model._meta.model_name}_id'
+          other_attname = f'{field.related_model._meta.model_name}_id'
+          objs = [
+            ThroughModel(**{
+              model_attname: data['api_id'],
+              other_attname: related_obj_api_id,
+            })
+            for related_obj_api_id in related_data
+          ]
+          related_objs[ThroughModel] = objs
         else:
           # Mix of dict and str
           raise NotImplementedError
@@ -288,6 +299,7 @@ class APIManager(models.Manager):
       data = self.raise_or_json(response)
 
       # Data contains two keys: '_links' and e.g. 'contacts',  'lists', etc
+      # TODO API Specific: `_links`
       links = data.pop('_links', None)
       data = next(iter(data.values()))
       for row in data:
@@ -730,7 +742,8 @@ class Contact(CTCTModel):
 
   list_memberships = models.ManyToManyField(
     ContactList,
-    related_name='contacts',
+    through='ContactContactList',
+    related_name='members',
     verbose_name=_('List Memberships'),
     blank=True,
   )
@@ -786,6 +799,11 @@ class Contact(CTCTModel):
     null=True,
     verbose_name=_('Opted Out On'),
   )
+  opt_out_reason = models.CharField(
+    max_length=255,
+    blank=True,
+    verbose_name=_('Opt Out Reason'),
+  )
 
   @property
   def name(self) -> str:
@@ -839,6 +857,10 @@ class Contact(CTCTModel):
   def clean_remote_opt_out_date(cls, data: dict) -> Optional[dt.datetime]:
     if opt_out_date := data['email_address'].get('opt_out_date'):
       return to_dt(opt_out_date)
+
+  @classmethod
+  def clean_remote_opt_out_reason(cls, data: dict) -> str:
+    return data['email_address'].get('opt_out_reason', '')
 
   def serialize(self, data: dict) -> dict:
     data['email_address'] = {
@@ -945,6 +967,34 @@ class Contact(CTCTModel):
       return ctct_obj
 
 
+class ContactContactList(models.Model):
+  """Custom through model that uses CTCT API ids.
+
+  Notes
+  -----
+  In order to bulk import the ManyToMany relationship between Contact and
+  ContactList, we create instances of the associated ThroughModel using the
+  API ids of Contact and ContactList. However, Django currently does not
+  support setting `to_field` in the Django-created ThroughModel, so we must
+  create our own ThroughModel in order specify the `to_field` values for the
+  ForeignKeys.
+
+  """
+
+  is_through_model = True
+
+  contact = models.ForeignKey(
+    Contact,
+    on_delete=models.CASCADE,
+    to_field='api_id',
+  )
+  contactlist = models.ForeignKey(
+    ContactList,
+    on_delete=models.CASCADE,
+    to_field='api_id',
+  )
+
+
 # DONE
 class ContactNote(CTCTLocalModel):
   """Django implementation of a CTCT Note."""
@@ -1034,10 +1084,11 @@ class ContactPhoneNumber(CTCTLocalModel):
     verbose_name_plural = _('Phone Numbers')
 
     constraints = [
-      models.UniqueConstraint(
-        fields=['contact', 'kind'],
-        name='unique_phone_number',
-      ),
+      # TODO: This doesn't seem enforced via CTCT
+      #models.UniqueConstraint(
+      #  fields=['contact', 'kind'],
+      #  name='unique_phone_number',
+      #),
       # TODO PUSH:
       # models.CheckConstraint(
       #   check=Q(contact__phone_numbers__count__lte=Contact.API_MAX_PHONE_NUMBERS),
@@ -1122,10 +1173,11 @@ class ContactStreetAddress(CTCTLocalModel):
     verbose_name_plural = _('Street Addresses')
 
     constraints = [
-      models.UniqueConstraint(
-        fields=['contact', 'kind'],
-        name='unique_street_address',
-      ),
+      # TODO: This doesn't seem enforced via CTCT
+      # models.UniqueConstraint(
+      #   fields=['contact', 'kind'],
+      #   name='unique_street_address',
+      # ),
       # TODO PUSH:
       # models.CheckConstraint(
       #   check=Q(contact__street_addresses__count__lte=Contact.API_MAX_STREET_ADDRESSES),
@@ -1207,10 +1259,11 @@ class ContactCustomField(CTCTLocalModel):
     verbose_name_plural = _('Custom Fields')
 
     constraints = [
-      models.UniqueConstraint(
-        fields=['contact', 'custom_field'],
-        name='unique_custom_field',
-      ),
+      # TODO: CTCT not enforcing this???
+      # models.UniqueConstraint(
+      #   fields=['contact', 'custom_field'],
+      #   name='unique_custom_field',
+      # ),
       # TODO PUSH:
       # models.CheckConstraint(
       #   check=Q(contact__custom_fields__count__lte=Contact.API_MAX_CUSTOM_FIELDS),
@@ -1267,7 +1320,7 @@ class EmailCampaign(CTCTModel):
 
   name = models.CharField(
     max_length=NAME_MAX_LENGTH,
-    unique=True,
+    #unique=True,  # TODO: It seems like CTCT doesn't enforce this
     verbose_name=_('Name'),
   )
   current_status = models.CharField(
