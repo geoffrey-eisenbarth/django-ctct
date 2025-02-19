@@ -276,8 +276,8 @@ class ContactAdmin(admin.ModelAdmin):
     }),
     ('CONTACT LISTS', {
       'fields': (
-        'list_memberships',
-        ('opt_out_source', 'opt_out_date'),
+        #'list_memberships',  # TODO: This breaks if using Custom ThroughModel?
+        ('opt_out_source', 'opt_out_date', 'opt_out_reason'),
       ),
     }),
     ('TIMESTAMPS', {
@@ -287,7 +287,8 @@ class ContactAdmin(admin.ModelAdmin):
       ),
     }),
   )
-  filter_horizontal = ('list_memberships', )
+  # TODO: This breaks if using Custom ThroughModel?
+  #filter_horizontal = ('list_memberships', )
   inlines = (
     ContactStreetAddressInline,
     ContactPhoneNumberInline,
@@ -304,6 +305,7 @@ class ContactAdmin(admin.ModelAdmin):
       'updated_at',
       'opt_out_source',
       'opt_out_date',
+      'opt_out_reason',
     ]
     if getattr(obj, 'opted_out', False) and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
@@ -405,6 +407,8 @@ class CampaignActivityInline(admin.StackedInline):
     widgets = {
       'html_content': forms.Textarea,
     }
+
+  # TODO?
   #def formfield_for_dbfield(
   #  self,
   #  db_field: ModelField,
