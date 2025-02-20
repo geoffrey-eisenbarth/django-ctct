@@ -4,9 +4,9 @@ from django.db.models import Model
 from django.utils import timezone
 
 
-def to_dt(s: str) -> dt.datetime:
-  TS_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
-  return timezone.make_aware(dt.datetime.strptime(s, TS_FORMAT))
+def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:
+  return timezone.make_aware(dt.datetime.strptime(s, ts_format))
+
 
 def get_related_fields(model: Model) -> (list, list, list, list):
   one_to_ones = []
