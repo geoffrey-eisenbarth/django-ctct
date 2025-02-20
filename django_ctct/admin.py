@@ -114,7 +114,7 @@ class ContactListAdmin(admin.ModelAdmin):
   list_display = (
     'name',
     'membership',
-    'opt_outs',
+    'optouts',
     'created_at',
     'updated_at',
     'favorite',
@@ -130,9 +130,9 @@ class ContactListAdmin(admin.ModelAdmin):
     return obj.contacts.count()
   membership.short_description = _('Membership')
 
-  def opt_outs(self, obj: ContactList) -> int:
+  def optouts(self, obj: ContactList) -> int:
     return obj.contacts.exclude(opt_out_source='').count()
-  opt_outs.short_description = _('Opt Outs')
+  optouts.short_description = _('Opt Outs')
 
   # ChangeView
   form = ContactListForm
@@ -434,7 +434,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
     'sends',
     'bounces',
     'clicks',
-    'opt_outs',
+    'optouts',
     'abuse',
   )
 
@@ -457,7 +457,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
     ('ANALYTICS', {
       'fields': (
         'sends', 'opens', 'clicks', 'forwards',
-        'opt_outs', 'abuse', 'bounces', 'not_opened',
+        'optouts', 'abuse', 'bounces', 'not_opened',
       ),
     }),
     ('INTERNAL', {
@@ -467,7 +467,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
   )
   readonly_fields = (
     'sends', 'opens', 'clicks', 'forwards',
-    'opt_outs', 'abuse', 'bounces', 'not_opened',
+    'optouts', 'abuse', 'bounces', 'not_opened',
   )
 
 
@@ -498,3 +498,32 @@ class EmailCampaignAdmin(admin.ModelAdmin):
       ),
     }[obj.action]
     self.message_user(request, message)
+
+# TODO: Implement actions
+#  ACTIONS = (
+#    ('NONE', 'Select Action'),
+#    ('CREATE', 'Create Draft'),
+#    ('SCHEDULE', 'Schedule'),
+#    ('UNSCHEDULE', 'Unschedule'),
+#  )
+#  ACTIONS_FROM_STATUS = {
+#    'NONE': ACTIONS[:3],
+#    'DRAFT': ACTIONS[:1] + ACTIONS[2:4],
+#    'SCHEDULED': ACTIONS[:1] + ACTIONS[3:4],
+#    'UNSCHEDULED': ACTIONS[:1] + ACTIONS[2:3],
+#    'EXECUTING': ACTIONS[:1],
+#    'DONE': ACTIONS[:1],
+#    'ERROR': ACTIONS[:1],
+#    'REMOVED': ACTIONS[:1],
+#  }
+#    if self.action == 'CREATE':
+#      activity.ctct_send_preview()
+#      self.current_status = 'DRAFT'
+#    elif self.action == 'SCHEDULE':
+#      activity.ctct_send_preview()
+#      activity.ctct_schedule()
+#      self.current_status = 'SCHEDULED'
+#    elif self.campaign.action == 'UNSCHEDULE':
+#      activity.ctct_unschedule()
+#      self.current_status = 'DRAFT'
+#    self.action = 'NONE'
