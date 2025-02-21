@@ -428,6 +428,8 @@ class EmailCampaignAdmin(admin.ModelAdmin):
   search_fields = ('name', )
   list_display = (
     'name',
+    'created_at',
+    'updated_at',
     'current_status',
     'scheduled_datetime',
     'open_rate',
@@ -469,7 +471,6 @@ class EmailCampaignAdmin(admin.ModelAdmin):
     'sends', 'opens', 'clicks', 'forwards',
     'optouts', 'abuse', 'bounces', 'not_opened',
   )
-
 
   inlines = (CampaignActivityInline, )
 
