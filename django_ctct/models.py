@@ -411,7 +411,7 @@ class RemoteManager(models.Manager):
     return None
 
 
-# TODO: signals and django-tasks
+# DONE
 class CTCTModel(Model):
   """Common CTCT model methods and properties."""
 
@@ -435,28 +435,24 @@ class CTCTModel(Model):
   class Meta:
     abstract = True
 
-  def ctct_save(self) -> dict:
-    """Create or Update on CTCT servers."""
-    if not self.api_id:
-      api_obj = self.ctct_create()
-    else:
-      api_obj = self.ctct_update()
-    return api_obj
-
   def save(self, *args, **kwargs) -> None:
     self.save_to_ctct = kwargs.pop('save_to_ctct', self.save_to_ctct)
     super().save(*args, **kwargs)
 
 
-# TODO: signals and django-tasks
+# DONE
 class CTCTLocalModel(CTCTModel):
-  """Local model without remote saving support."""
+  """Local model without remote saving support.
+
+  Notes
+  -----
+  The crucial check that prevents CTCTLocalModels from being saved remotely is
+  the `isinstance(instance, CTCTLocalModel)` lines in signals.py.
+
+  """
 
   class Meta(CTCTModel.Meta):
     abstract = True
-
-  def ctct_save(self) -> dict:
-    return {}
 
 
 # DONE
