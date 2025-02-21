@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import datetime as dt
-from typing import Literal, Optional, Self
+from typing import Literal, Optional, Self, NoReturn
 
 import jwt
 from ratelimit import limits, sleep_and_retry
@@ -16,9 +16,11 @@ from django.core.exceptions import ValidationError, ImproperlyConfigured
 from django.core.validators import validate_email
 from django.db import models
 from django.db.models import Model
+from django.db.models.fields import NOT_PROVIDED
 from django.db.models.query import QuerySet
 from django.db.models.signals import post_save, m2m_changed, pre_delete
 from django.dispatch import receiver
+from django.http import Http404
 from django.urls import reverse
 from django.utils import timezone, formats
 from django.utils.translation import gettext_lazy as _
@@ -29,16 +31,17 @@ from phonenumber_field.modelfields import PhoneNumberField
 from django_ctct.utils import to_dt, get_related_fields
 
 from django_ctct.tasks import (
-  ctct_save_job, ctct_delete_job, ctct_rename_job,
-  ctct_update_lists_job, ctct_add_list_memberships_job,
+  ctct_save_task, ctct_delete_task, ctct_rename_task,
+  ctct_update_lists_task, ctct_add_list_memberships_task,
 )
 
 
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 
-# TODO 1: Remove setup()
-class APIManager(models.Manager):
+# TODO: update(), create()
+class RemoteManager(models.Manager):
+  """Base class for utilizing the API."""
 
   API_URL = 'https://api.cc.email'
   API_VERSION = '/v3'
@@ -47,7 +50,11 @@ class APIManager(models.Manager):
 
   TS_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 
-  def setup(self) -> None:
+  def get_queryset(self):
+    """Prevent access to the db from within RemoteManager."""
+    return super().get_queryset().none()
+
+  def connect(self) -> None:
     self.session = requests.Session()
     self.session.headers.update(Token.get().authorization_header)
 
@@ -56,7 +63,7 @@ class APIManager(models.Manager):
 
     data = {}
 
-    for field_name in obj.API_BODY_FIELDS:
+    for field_name in obj.API_EDITABLE_FIELDS:
       field = self.model._meta.get_field(field_name)
       if field_name.endswith('_id'):
         # Convert related object UUID to string
@@ -66,7 +73,13 @@ class APIManager(models.Manager):
         value = getattr(obj, field_name).strftime(self.TS_FORMAT)
       elif not field.is_relation:
         value = getattr(obj, field_name)
-      elif field.one_to_many or field.many_to_many:
+      elif field.many_to_many:
+        if obj.pk:
+          # TODO API: What if not str/UUID
+          value = [str(_.api_id) for _ in getattr(obj, field_name).all()]
+        else:
+          value = []
+      elif field.one_to_many:
         if obj.pk:
           serialize = field.related_model.remote.serialize
           value = [serialize(_) for _ in getattr(obj, field_name).all()]
@@ -77,7 +90,7 @@ class APIManager(models.Manager):
         value = serialize(getattr(obj, field_name))
       data[field_name] = value
 
-    # Allow individual models to override serialization
+    # Allow models to override manager serialization
     if hasattr(obj, 'serialize'):
       data = obj.serialize(data)
 
@@ -106,19 +119,22 @@ class APIManager(models.Manager):
     model_fields = self.model._meta.get_fields()
     for field in model_fields:
       if clean := getattr(self.model, f'clean_remote_{field.name}', None):
-        data[field.name] = clean(data)
-
-    # Restrict to the fields defined in the Django object
-    data = {
-      k: v for k, v in data.items()
-      if k in [f.name for f in model_fields]
-    }
+        if (value := clean(data)) is not None:
+          data[field.name] = value
 
     # Set related objects
     data = self.deserialize_related_obj_fields(data)
     data, related_objs = self.deserialize_related_objs_fields(data)
 
+    # Restrict to the fields defined in the Django object
+    # NOTE: We prefer `field.attname` over `field.name` in order to pick up
+    # ForeignKeys and OneToOneFields
+    data = {
+      k: v for k, v in data.items()
+      if k in [getattr(f, 'attname', f.name) for f in model_fields]
+    }
     obj = self.model(**data)
+
     return obj, related_objs
 
   def deserialize_related_obj_fields(self, data: dict) -> dict:
@@ -164,7 +180,6 @@ class APIManager(models.Manager):
     for field in filter(lambda f: f.name in data, mtms + rfks):
 
       if related_data := data.pop(field.name):
-
         if all(isinstance(_, dict) for _ in related_data):
           # Add in the parent object's `api_id`
           parent = {field.remote_field.name: data['api_id']}
@@ -172,7 +187,7 @@ class APIManager(models.Manager):
           objs = [deserialize(datum | parent)[0] for datum in related_data]
           related_objs[field.related_model] = objs
         elif all(isinstance(_, str) for _ in related_data):
-          # TODO API Specific: What if api_ids were ints instead of uuids?
+          # TODO API: What if api_ids were ints instead of uuids?
           # ManyToManyField, make a list of "through model" instances
           ThroughModel = getattr(self.model, field.name).through
           model_attname = f'{field.model._meta.model_name}_id'
@@ -196,7 +211,7 @@ class APIManager(models.Manager):
     method: HttpMethod,
     api_id: Optional[str] = None,
     endpoint: Optional[str] = None,
-    suffix_endpoint: Optional[str] = None,
+    endpoint_suffix: Optional[str] = None,
   ) -> str:
     endpoint = endpoint or self.model.API_ENDPOINT
     if not endpoint.startswith(self.API_VERSION):
@@ -207,8 +222,8 @@ class APIManager(models.Manager):
     if api_id:
       url += f'/{api_id}'
 
-    if suffix_endpoint:
-      url += f'{suffix_endpoint}'
+    if endpoint_suffix:
+      url += f'{endpoint_suffix}'
 
     if (method == 'GET') and ('?' not in url) and self.model.API_GET_QUERIES:
       url += '?'
@@ -220,13 +235,19 @@ class APIManager(models.Manager):
   def raise_or_json(self, response: Response) -> Optional[dict]:
     if response.status_code == 204:
       data = None
+    elif response.status_code == 404:
+      # Allow catching 404 separately from HTTPError
+      raise Http404
     else:
       data = response.json()
 
     try:
       response.raise_for_status()
     except HTTPError:
-      raise HTTPError(data[0]['error_message'])
+      if isinstance(data, list):
+        data = data[0]
+      message = f"[{response.status_code}] {data['error_message']}"
+      raise HTTPError(message, response=response)
 
     return data
 
@@ -236,19 +257,20 @@ class APIManager(models.Manager):
     """Honor the API's rate limit."""
     pass
 
-  # TODO: save related_objs?
   def create(self, obj: Model) -> Model:
-    """Create existing Django object on the remote server.
+    """Creates an existing Django object on the remote server.
 
     Notes
     -----
     This method saves the API's response to the local database in order to
-    preserve values calculated by the API (e.g. `api_id`).
+    preserve values calculated by the API (e.g. API_READONLY_FIELDS).
 
     """
 
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first!')
+
+    self.check_api_limit()
     response = self.session.post(
       url=self.get_url(method='POST'),
       json=self.serialize(obj),
@@ -256,12 +278,18 @@ class APIManager(models.Manager):
     data = self.raise_or_json(response)
 
     obj, related_objs = self.deserialize(data)
+
     obj.pk = pk
     obj.save()
 
+    # TODO: Delete if RelatedModel is ManyToMany?
+    #       Can we only deleted through models that are related?
+    for RelatedModel, objs in related_objs.items():
+      RelatedModel.objects.bulk_create(objs, update_conflicts=False)
+
     return obj
 
-  def get(self, api_id: str) -> (Model, dict):
+  def get(self, api_id: str) -> (Optional[Model], dict):
     """Get an existing object from the remote server.
 
     Notes
@@ -271,15 +299,21 @@ class APIManager(models.Manager):
 
     """
 
+    self.check_api_limit()
+
     url = self.get_url(method='GET', api_id=api_id)
     response = self.session.get(url)
-    data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data)
+    try:
+      data = self.raise_or_json(response)
+    except Http404:
+      obj, related_objs = None, {}
+    else:
+      obj, related_objs = self.deserialize(data)
 
     return obj, related_objs
 
-  def all(self) -> (list[Model], dict):
+  def all(self, endpoint: Optional[str] = None) -> (list[Model], dict):
     """Get all existing objects from the remote server.
 
     Notes
@@ -291,15 +325,16 @@ class APIManager(models.Manager):
 
     objs, related_objs = [], defaultdict(list)
 
-    paginated, endpoint = True, None
+    paginated = True
     while paginated:
-      url = self.get_url(method='GET', endpoint=endpoint)
       self.check_api_limit()
+
+      url = self.get_url(method='GET', endpoint=endpoint)
       response = self.session.get(url)
       data = self.raise_or_json(response)
 
       # Data contains two keys: '_links' and e.g. 'contacts',  'lists', etc
-      # TODO API Specific: `_links`
+      # TODO API: `_links`
       links = data.pop('_links', None)
       data = next(iter(data.values()))
       for row in data:
@@ -317,7 +352,6 @@ class APIManager(models.Manager):
 
     return objs, related_objs
 
-  # TODO: save related_objs?
   def update(self, obj: Model) -> Model:
     """Update exisiting Django object on the remote server.
 
@@ -333,6 +367,7 @@ class APIManager(models.Manager):
     elif not obj.api_id:
       raise ValueError('Must create object remotely first')
 
+    self.check_api_limit()
     response = self.session.put(
       url=self.get_url(method='PUT', api_id=obj.api_id),
       json=self.serialize(obj),
@@ -340,28 +375,34 @@ class APIManager(models.Manager):
     data = self.raise_or_json(response)
 
     obj, related_objs = self.deserialize(data)
+
     obj.pk = pk
     obj.save()
 
+    for RelatedModel, objs in related_objs.items():
+      RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
+
     return obj
 
-  def delete(self, obj: Model, suffix_endpoint: Optional[str] = None) -> None:
+  def delete(self, obj: Model, endpoint_suffix: Optional[str] = None) -> None:
     """Delete existing Django object on the remote server.
 
     Notes
     -----
     This method can be used to delete sub-resources of an object (such as a
-    scheduled EmailCampaign) via the optional `suffix_endpoint` param.
+    scheduled EmailCampaign) via the optional `endpoint_suffix` param.
 
     We ignore 404 responses in the situation that the remote object has already
     been deleted.
 
     """
 
+    self.check_api_limit()
+
     url = self.get_url(
       method='DELETE',
       api_id=obj.api_id,
-      suffix_endpoint=suffix_endpoint,
+      endpoint_suffix=endpoint_suffix,
     )
     response = self.session.delete(url)
 
@@ -372,12 +413,17 @@ class APIManager(models.Manager):
     return None
 
 
+# TODO: signals and django-tasks
 class CTCTModel(Model):
   """Common CTCT model methods and properties."""
 
   API_URL = 'https://api.cc.email'
   API_VERSION = '/v3'
   API_GET_QUERIES = {}
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = RemoteManager()
 
   save_to_ctct: Optional[Literal['sync', 'async']] = 'async'
 
@@ -388,25 +434,23 @@ class CTCTModel(Model):
     blank=True,
   )
 
-  objects = models.Manager()
-  remote = APIManager()
-
   class Meta:
     abstract = True
 
   def ctct_save(self) -> dict:
     """Create or Update on CTCT servers."""
     if not self.api_id:
-      ctct_obj = self.ctct_create()
+      api_obj = self.ctct_create()
     else:
-      ctct_obj = self.ctct_update()
-    return ctct_obj
+      api_obj = self.ctct_update()
+    return api_obj
 
   def save(self, *args, **kwargs) -> None:
     self.save_to_ctct = kwargs.pop('save_to_ctct', self.save_to_ctct)
     super().save(*args, **kwargs)
 
 
+# TODO: signals and django-tasks
 class CTCTLocalModel(CTCTModel):
   """Local model without remote saving support."""
 
@@ -417,6 +461,7 @@ class CTCTLocalModel(CTCTModel):
     return {}
 
 
+# DONE
 class Token(Model):
   """Authorization token for CTCT API access.
 
@@ -484,7 +529,7 @@ class Token(Model):
         'grant_type': 'refresh_token',
       },
     )
-    data = APIManager.raise_or_json(response)
+    data = RemoteManager.raise_or_json(response)
 
     # Create new Token for future use
     if 'refresh_token' in data:
@@ -524,19 +569,59 @@ class Token(Model):
   def authorization_header(self) -> dict:
     return {'Authorization': f"{self.type} {self.access_code}"}
 
-# TODO: ctct_add_list_memberships
+
+# DONE
+class ContactListRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle adding multiple Contacts."""
+
+  def add_list_memberships(
+    self,
+    lists: QuerySet['ContactList'],
+    contacts: QuerySet['Contact']
+  ) -> None:
+    """Adds multiple Contacts to (multiple) ContactLists."""
+
+    API_MAX_CONTACTS = 500
+
+    list_ids = list(map(str, lists.values_list('api_id', flat=True)))
+    contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
+
+    for i in range(0, len(contact_ids), API_MAX_CONTACTS):
+      self.check_api_limit()
+      response = self.session.post(
+        url=self.get_url(
+          method='POST',
+          endpoint='/activities/add_list_memberships',
+        ),
+        json={
+          'source': {'contact_ids': contact_ids[i:i + API_MAX_CONTACTS]},
+          'list_ids': list_ids,
+        },
+      )
+      self.raise_or_json(response)
+
+
+# DONE
 class ContactList(CTCTModel):
   """Django implementation of a CTCT Contact List."""
 
   API_ENDPOINT = '/contact_lists'
   API_ID_LABEL = 'list_id'
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'name',
     'description',
     'favorite',
   )
-  API_MAX_NUM = 500
+  API_READONLY_FIELDS = (
+    'created_at',
+    'updated_at',
+  )
 
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactListRemoteManager()
+
+  # API editable fields
   name = models.CharField(
     max_length=255,
     verbose_name=_('Name'),
@@ -551,6 +636,8 @@ class ContactList(CTCTModel):
     verbose_name=_('Favorite'),
     help_text=_('Mark the list as a favorite'),
   )
+
+  # API read-only fields
   created_at = models.DateTimeField(
     auto_now_add=True,
     verbose_name=_('Created At'),
@@ -568,31 +655,6 @@ class ContactList(CTCTModel):
   def __str__(self) -> str:
     return self.name
 
-  def ctct_add_list_memberships(
-    self,
-    contacts: QuerySet['Contact']
-  ) -> list(dict):
-    """Adds multiple Contacts to a single ContactList."""
-
-    responses = []
-    contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
-    for i in range(0, len(contact_ids), self.API_MAX_NUM):
-      response = requests.post(
-        url=self.get_url(
-          method='POST',
-          endpoint='/activities/add_list_memberships',
-        ),
-        headers=self.headers,
-        json={
-          'source': {
-            'contact_ids': contact_ids[i:i + self.API_MAX_NUM],
-          },
-          'list_ids': [str(self.api_id)],
-        },
-      )
-      responses.append(self.raise_or_json(response))
-    return responses
-
 
 # DONE
 class CustomField(CTCTModel):
@@ -600,9 +662,14 @@ class CustomField(CTCTModel):
 
   API_ENDPOINT = '/contact_custom_fields'
   API_ID_LABEL = 'custom_field_id'
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'label',
     'type',
+  )
+  API_READONLY_FIELDS = (
+    'name',
+    'created_at',
+    'updated_at',
   )
 
   TYPES = (
@@ -610,19 +677,12 @@ class CustomField(CTCTModel):
     ('date', 'Date'),
   )
 
+  # API editable fields
   label = models.CharField(
     max_length=50,
     verbose_name=_('Label'),
     help_text=_(
       'The display name for the custom_field shown in the UI as free-form text'
-    ),
-  )
-  name = models.CharField(
-    max_length=50,
-    editable=False,
-    verbose_name=_('Name'),
-    help_text=_(
-      'Unique name constructed by replacing blanks with underscores'
     ),
   )
   type = models.CharField(
@@ -631,6 +691,16 @@ class CustomField(CTCTModel):
     verbose_name=_('Type'),
     help_text=_(
       'Specifies the type of value the custom_field field accepts'
+    ),
+  )
+
+  # API read-only fields
+  name = models.CharField(
+    max_length=50,
+    editable=False,
+    verbose_name=_('Name'),
+    help_text=_(
+      'Unique name constructed by replacing blanks with underscores'
     ),
   )
   created_at = models.DateTimeField(
@@ -646,14 +716,96 @@ class CustomField(CTCTModel):
     return self.label
 
 
-# TODO: ctct_update_or_create, ctct_update_lists
+# TODO: update_or_create()
+class ContactRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle ContactLists."""
+
+  # TODO: Get error 400 if no list_memberships
+  def update_or_create(self, obj: Contact) -> Contact:
+    """Updates or creates the Contact based on `email`.
+
+    Notes
+    -----
+
+    The '/sign_up_form' endpoint will allow us to do a "update or create"
+    request, based on the email address of the Contact. This can be useful
+    when creating Contacts that may already exist in ConstantContact's
+    database, even if they've been "deleted" before.
+
+    Updates to existing contacts are partial updates. This endpoint only
+    updates the fields that are included in the request body. Updates append
+    new contact lists or custom fields to the existing `list_memberships` or
+    `custom_fields` arrays.
+
+    """
+
+    if not (pk := obj.pk):
+      raise ValueError('Must create object locally first')
+
+    # This endpoint expects a slightly different serialization
+    data = self.serialize(obj)
+    data['email_address'] = data.pop('email_address')['address']
+
+    self.check_api_limit()
+    response = self.session.post(
+      url=self.get_url(method='POST', endpoint_suffix='/sign_up_form'),
+      json=data,
+    )
+    data = self.raise_or_json(response)
+
+    obj, related_objs = self.deserialize(data)
+
+    obj.pk = pk
+    obj.save()
+
+    for RelatedModel, objs in related_objs.items():
+      RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
+
+  def update(self, obj: Contact) -> Optional[Contact]:
+    """Update Contact and ContactList membership on CTCT servers.
+
+    Notes
+    -----
+    The PUT call will overwrite all properties not included in the request
+    body with NULL, so we need to make sure the `serialize()` method
+    includes all important fields. While the `create_or_update()` method
+    supports partial updates, it won't allow us to remove a ContactList.
+
+    CTCT requires that all contacts be a member of at least one ContactList,
+    so in the event of removing someone from all lists, we should actually
+    issue a DELETE call; however, these 'deleted' Contacts retain their ID
+    in ConstantContact's database and can be revived at any time.
+
+    """
+
+    if obj.list_memberships.exists():
+      response = super().update(obj)
+    else:
+      response = self.delete(obj)
+    return response
+
+
+# DONE
 class Contact(CTCTModel):
-  """Django implementation of a CTCT Contact."""
+  """Django implementation of a CTCT Contact.
+
+  Notes
+  -----
+  The following editable fields are specified in `Contact.serialize()`:
+    1) 'email'
+    2) 'permission_to_send'
+    3) 'create_source'
+    4) 'update_source'
+
+  The following editable fields are specified as `custom_fields`:A
+    1) 'honorific'
+    2) 'suffix'
+
+  """
 
   API_ENDPOINT = '/contacts'
   API_ID_LABEL = 'contact_id'
-  API_BODY_FIELDS = (
-    'first_name',
+  API_EDITABLE_FIELDS = (
     'last_name',
     'job_title',
     'company_name',
@@ -662,6 +814,14 @@ class Contact(CTCTModel):
     'custom_fields',
     'list_memberships',
     'notes',
+  )
+
+  API_READONLY_FIELDS = (
+    'created_at',
+    'updated_at',
+    'opt_out_source',
+    'opt_out_date',
+    'opt_out_reason',
   )
   API_GET_QUERIES = {
     'include': ','.join([
@@ -676,6 +836,11 @@ class Contact(CTCTModel):
   API_MAX_PHONE_NUMBERS = 3
   API_MAX_STREET_ADDRESSES = 3
   API_MAX_CUSTOM_FIELDS = 25
+  API_MAX_LIST_MEMBERSHIPS = 50
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactRemoteManager()
 
   SALUTATIONS = (
     ('Mr.', 'Mr.'),
@@ -742,7 +907,7 @@ class Contact(CTCTModel):
 
   list_memberships = models.ManyToManyField(
     ContactList,
-    through='ContactContactList',
+    through='ContactAndContactList',
     related_name='members',
     verbose_name=_('List Memberships'),
     blank=True,
@@ -870,104 +1035,9 @@ class Contact(CTCTModel):
     data.update(self.ctct_source)
     return data
 
-  def ctct_create(self) -> dict:
-    """Redirect to the 'update_or_create' endpoint.
 
-    Notes
-    -----
-    Since CTCT could already have entries for Contacts that do not have Django
-    objects yet, we use CTCT's `update_or_create` method which will re-activate
-    any contacts that were previously added to CTCT and then later deleted
-    ('deactivated' to use CTCT's term).
-
-    """
-    return self.ctct_update_or_create()
-
-  def ctct_update(self) -> dict:
-    """Redirect to the 'update_or_create' endpoint.
-
-    Notes
-    -----
-    While CTCT does support using PUT request to /contact/{api_id}, we defer to
-    using `update_or_create` until it's necessary to implement the PUT method.
-
-    """
-    return self.ctct_update_or_create()
-
-  def ctct_update_or_create(self) -> dict:
-    """Update or create a Contact on CTCT servers.
-
-    Notes
-    -----
-
-    Use this method to create a new contact or update an existing contact. This
-    method uses the email_address string value you include in the request body
-    to determine if it should create an new contact or update an existing
-    contact.
-
-    Updates to existing contacts are partial updates. This method only updates
-    the contact properties you include in the request body. Updates append new
-    contact lists or custom fields to the existing list_memberships or
-    custom_fields arrays.
-
-    This is basically a CTCTModel.ctct_create() method with a different
-    API_ENDPOINT.
-
-    """
-    endpoint = self.API_ENDPOINT
-    self.API_ENDPOINT += '/sign_up_form'
-    try:
-      ctct_obj = super().ctct_create()
-    except Exception as e:
-      exception = e
-    else:
-      # Response only contains CTCT ID and action status
-      exception = None
-      ctct_obj['email'] = self.email
-    finally:
-      self.API_ENDPOINT = endpoint
-
-    if exception:
-      raise exception
-
-    return ctct_obj
-
-  # NOTE: This is the inverse of add_list_memberships()
-  def ctct_update_lists(self) -> Optional[dict]:
-    """Update Contact and ContactList membership on CTCT servers.
-
-    Notes
-    -----
-    The PUT call will overwrite all properties not included in the request
-    body with NULL, so we need to make sure the `serialize()` method
-    includes all important fields. While the `create_or_update()` method
-    supports partial updates, it won't allow us to remove a ContactList,
-    so we must use the PUT method for that.
-
-    CTCT requires that all contacts be a member of at least one ContactList,
-    so in the event of removing someone from all lists, we should actually
-    issue a DELETE call; however, these 'deleted' Contacts retain their ID
-    in ConstantContact's database and can be revived at any time.
-
-    """
-
-    if self.opted_out:
-      response = {}
-    elif not self.list_memberships.exists():
-      # CTCT requires that Contacts be a member of at least one ContactList
-      self.ctct_delete()
-      return None
-    else:
-      response = requests.put(
-        url=self.get_url(method='PUT'),
-        headers=self.headers,
-        json=self.serialize(method='PUT'),
-      )
-      ctct_obj = self.raise_or_json(response)
-      return ctct_obj
-
-
-class ContactContactList(models.Model):
+# DONE
+class ContactAndContactList(models.Model):
   """Custom through model that uses CTCT API ids.
 
   Notes
@@ -1000,11 +1070,12 @@ class ContactNote(CTCTLocalModel):
   """Django implementation of a CTCT Note."""
 
   API_ID_LABEL = 'note_id'
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'note_id',
     'created_at',
     'content',
   )
+  API_READONLY_FIELDS = tuple()
 
   contact = models.ForeignKey(
     Contact,
@@ -1013,6 +1084,14 @@ class ContactNote(CTCTLocalModel):
     related_name='notes',
     verbose_name=_('Contact'),
   )
+  author = models.ForeignKey(
+    settings.AUTH_USER_MODEL,
+    on_delete=models.CASCADE,
+    null=True,
+    verbose_name=_('Author'),
+  )
+
+  # API read-only fields
   created_at = models.DateTimeField(
     auto_now=True,
     verbose_name=_('Created at'),
@@ -1022,12 +1101,6 @@ class ContactNote(CTCTLocalModel):
     max_length=2000,
     verbose_name=_('Content'),
     help_text=_('The content for the note'),
-  )
-  author = models.ForeignKey(
-    settings.AUTH_USER_MODEL,
-    on_delete=models.CASCADE,
-    null=True,
-    verbose_name=_('Author'),
   )
 
   class Meta:
@@ -1048,7 +1121,7 @@ class ContactPhoneNumber(CTCTLocalModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
   API_ID_LABEL = 'phone_number_id'
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'kind',
     'phone_number',
   )
@@ -1068,6 +1141,8 @@ class ContactPhoneNumber(CTCTLocalModel):
     related_name='phone_numbers',
     verbose_name=_('Contact'),
   )
+
+  # API editable fields
   kind = models.CharField(
     choices=KINDS,
     max_length=6,
@@ -1084,11 +1159,11 @@ class ContactPhoneNumber(CTCTLocalModel):
     verbose_name_plural = _('Phone Numbers')
 
     constraints = [
-      # TODO: This doesn't seem enforced via CTCT
-      #models.UniqueConstraint(
-      #  fields=['contact', 'kind'],
-      #  name='unique_phone_number',
-      #),
+      # TODO PUSH: This doesn't seem enforced via CTCT
+      # models.UniqueConstraint(
+      #   fields=['contact', 'kind'],
+      #   name='unique_phone_number',
+      # ),
       # TODO PUSH:
       # models.CheckConstraint(
       #   check=Q(contact__phone_numbers__count__lte=Contact.API_MAX_PHONE_NUMBERS),
@@ -1114,7 +1189,7 @@ class ContactStreetAddress(CTCTLocalModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
   API_ID_LABEL = 'street_address_id'
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'kind',
     'street',
     'city',
@@ -1122,6 +1197,7 @@ class ContactStreetAddress(CTCTLocalModel):
     'postal_code',
     'country',
   )
+  API_READONLY_FIELDS = tuple()
 
   KINDS = (
     ('home', 'Home'),
@@ -1136,6 +1212,8 @@ class ContactStreetAddress(CTCTLocalModel):
     related_name='street_addresses',
     verbose_name=_('Contact'),
   )
+
+  # API editable fields
   kind = models.CharField(
     choices=KINDS,
     max_length=5,
@@ -1173,7 +1251,7 @@ class ContactStreetAddress(CTCTLocalModel):
     verbose_name_plural = _('Street Addresses')
 
     constraints = [
-      # TODO: This doesn't seem enforced via CTCT
+      # TODO PUSH: This doesn't seem enforced via CTCT
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
       #   name='unique_street_address',
@@ -1223,17 +1301,18 @@ class ContactCustomField(CTCTLocalModel):
 
   Notes
   -----
-  It's important to specify `custom_field_id` in `API_BODY_FIELDS` instead
+  It's important to specify `custom_field_id` in `API_EDITABLE_FIELDS` instead
   of `custom_field`; using the latter will result in a serialized CustomField
   instance when Contact is serialized.
 
   """
 
   API_ID_LABEL = None
-  API_BODY_FIELDS = (
+  API_EDITABLE_FIELDS = (
     'custom_field_id',
     'value',
   )
+  API_READONLY_FIELDS = tuple()
 
   contact = models.ForeignKey(
     Contact,
@@ -1242,6 +1321,8 @@ class ContactCustomField(CTCTLocalModel):
     related_name='custom_fields',
     verbose_name=_('Contact'),
   )
+
+  # API editable fields
   custom_field = models.ForeignKey(
     CustomField,
     on_delete=models.CASCADE,
@@ -1259,7 +1340,7 @@ class ContactCustomField(CTCTLocalModel):
     verbose_name_plural = _('Custom Fields')
 
     constraints = [
-      # TODO: CTCT not enforcing this???
+      # TODO PUSH: This doesn't seem enforced via CTCT
       # models.UniqueConstraint(
       #   fields=['contact', 'custom_field'],
       #   name='unique_custom_field',
@@ -1283,13 +1364,114 @@ class ContactCustomField(CTCTLocalModel):
     return data['custom_field_id']
 
 
-# TODO 1: Deserialize
-# TODO: ctct_update, ctct_create, ctct_rename
+# TODO: create()
+class EmailCampaignRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle creating EmailCampaigns."""
+
+  def create(self, obj: EmailCampaign) -> EmailCampaign:
+    """Creates an existing EmailCampaign on the remote servers.
+
+    Notes
+    -----
+    This method will also create the new `primary_email` and `permalink`
+    CampaignActivities on CTCT and associate the `primary_email` one
+    with the new EmailCampaign in the database.
+
+    """
+
+    # Set name and initialize the CampaignActivity object (do not create it!)
+    activity = CampaignActivity(
+      campaign=obj,
+      role='primary_email',
+    )
+
+    # Create EmailCampaign (and CampaignActivities) on CTCT servers
+    self.check_api_limit()
+    response = self.session.post(
+      url=self.get_url(method='POST'),
+      json={
+        'name': obj.name,
+        'email_campaign_activities': [
+          CampaignActivity.remote.serialize(activity),
+        ]
+      },
+    )
+
+    if response.status_code == 409:
+      # EmailCampaign name not unique, fetch existing EmailCampaign from CTCT
+      data = self.read(name=self.name)  # TODO: name=self.name?
+    else:
+      data = self.raise_or_json(response)
+
+    # Get the associated CampaignActivity ID and save
+    for campaign_activity in data['campaign_activities']:
+      if campaign_activity['role'] == 'primary_email':
+        activity.api_id = campaign_activity['campaign_activity_id']
+        activity.save(save_to_ctct=False)
+        break
+
+    # Schedule and send preview
+    # NOTE Moved to admin.
+    # TODO: How to create + schedule async? Can we have task callbacks?
+
+    # Update CTCT response with local field values
+    data.update({
+      'current_status': self.current_status,
+    })
+
+    return data
+
+  def update(self, obj: EmailCampaign) -> EmailCampaign:
+    """Update EmailCampaign on remote servers.
+
+    Notes
+    -----
+    The only field that can be updated this way is the `name` field.
+
+    """
+    if not (pk := obj.pk):
+      raise ValueError('Must create object locally first')
+    elif not obj.api_id:
+      raise ValueError('Must create object remotely first')
+
+    self.check_api_limit()
+    response = self.session.patch(
+      url=self.get_url(method='PATCH', api_id=obj.api_id),
+      json={'name': obj.name},
+    )
+    data = self.raise_or_json(response)
+
+    obj, _ = self.deserialize(data)
+
+    obj.pk = pk
+    obj.save()
+
+    return obj
+
+
+# TODO EmailCampaign.current_status vs CampaignActivity.current_status
 class EmailCampaign(CTCTModel):
   """Django implementation of a CTCT EmailCampaign."""
 
   API_ENDPOINT = '/emails'
   API_ID_LABEL = 'campaign_id'
+  API_EDITABLE_FIELDS = (
+    'name',
+    'scheduled_datetime',
+  )
+  API_READONLY_FIELDS = (
+    'current_status',
+    'created_at',
+    'updated_at',
+    'sends',
+    'opens',
+    'clicks',
+    'forwards',
+    'optouts',
+    'abuse',
+    'bounces',
+    'not_opened',
+  )
 
   STATUSES = (
     ('NONE', 'Processing'),
@@ -1300,45 +1482,34 @@ class EmailCampaign(CTCTModel):
     ('ERROR', 'Error'),
     ('REMOVED', 'Removed'),
   )
-  ACTIONS = (
-    ('NONE', 'Select Action'),
-    ('CREATE', 'Create Draft'),
-    ('SCHEDULE', 'Schedule'),
-    ('UNSCHEDULE', 'Unschedule'),
-  )
-  ACTIONS_FROM_STATUS = {
-    'NONE': ACTIONS[:3],
-    'DRAFT': ACTIONS[:1] + ACTIONS[2:4],
-    'SCHEDULED': ACTIONS[:1] + ACTIONS[3:4],
-    'UNSCHEDULED': ACTIONS[:1] + ACTIONS[2:3],
-    'EXECUTING': ACTIONS[:1],
-    'DONE': ACTIONS[:1],
-    'ERROR': ACTIONS[:1],
-    'REMOVED': ACTIONS[:1],
-  }
   NAME_MAX_LENGTH = 80
 
+  # API editable fields
   name = models.CharField(
     max_length=NAME_MAX_LENGTH,
-    #unique=True,  # TODO: It seems like CTCT doesn't enforce this
+    # unique=True,  # TODO PUSH: It seems like CTCT isn't enforcing this
     verbose_name=_('Name'),
-  )
-  current_status = models.CharField(
-    choices=STATUSES,
-    max_length=20,
-    default='NONE',
-    verbose_name=_('Campaign Status'),
-  )
-  action = models.CharField(
-    choices=ACTIONS,
-    max_length=20,
-    default='NONE',
-    verbose_name=_('Action'),
   )
   scheduled_datetime = models.DateTimeField(
     blank=True,
     null=True,
     verbose_name=_('Scheduled'),
+  )
+
+  # API read-only fields
+  current_status = models.CharField(
+    choices=STATUSES,
+    max_length=20,
+    default='NONE',
+    verbose_name=_('Current Status'),
+  )
+  created_at = models.DateTimeField(
+    auto_now_add=True,
+    verbose_name=_('Created At'),
+  )
+  updated_at = models.DateTimeField(
+    auto_now=True,
+    verbose_name=_('Updated At'),
   )
   sends = models.IntegerField(
     default=0,
@@ -1360,7 +1531,7 @@ class EmailCampaign(CTCTModel):
     verbose_name=_('Forwards'),
     help_text=_('The total number of unique forwards'),
   )
-  opt_outs = models.IntegerField(
+  optouts = models.IntegerField(
     default=0,
     verbose_name=_('Opt Out'),
     help_text=_('The total number of people who unsubscribed'),
@@ -1385,7 +1556,7 @@ class EmailCampaign(CTCTModel):
     verbose_name = _('Email Campaign')
     verbose_name_plural = _('Email Campaigns')
 
-    ordering = ('-scheduled_datetime', )
+    ordering = ('-updated_at', '-created_at', '-scheduled_datetime')
 
   def __str__(self) -> str:
     return self.name
@@ -1403,97 +1574,177 @@ class EmailCampaign(CTCTModel):
       raise ValidationError(message)
 
   @classmethod
-  def deserialize(self, ctct_obj) -> dict:
-    """Add extra data from the /email_campaign_summaries/ API endpoint"""
-    if counts := ctct_obj.get('unique_counts'):
-      ctct_obj.update(counts)
-      ctct_obj['current_status'] = 'DONE'
-    return super().deserialize(ctct_obj)
+  def clean_remote_counts(cls, stat: str, data: dict) -> int:
+    return data.get('unique_counts', {}).get(stat, 0)
 
-  def ctct_create(self) -> dict:
-    """Creates the CTCT EmailCampaign and sets relevant model fields.
+  @classmethod
+  def clean_remote_sends(cls, data: dict) -> int:
+    return cls.clean_remote_counts('sends', data)
+
+  @classmethod
+  def clean_remote_opens(cls, data: dict) -> int:
+    return cls.clean_remote_counts('opens', data)
+
+  @classmethod
+  def clean_remote_clicks(cls, data: dict) -> int:
+    return cls.clean_remote_counts('clicks', data)
+
+  @classmethod
+  def clean_remote_forwards(cls, data: dict) -> int:
+    return cls.clean_remote_counts('forwards', data)
+
+  @classmethod
+  def clean_remote_optouts(cls, data: dict) -> int:
+    return cls.clean_remote_counts('optouts', data)
+
+  @classmethod
+  def clean_remote_abuse(cls, data: dict) -> int:
+    return cls.clean_remote_counts('abuse', data)
+
+  @classmethod
+  def clean_remote_bounces(cls, data: dict) -> int:
+    return cls.clean_remote_counts('bounces', data)
+
+  @classmethod
+  def clean_remote_not_opened(cls, data: dict) -> int:
+    return cls.clean_remote_counts('not_opened', data)
+
+  @classmethod
+  def clean_remote_current_status(cls, data: dict) -> str:
+    if data.get('unique_counts'):
+      current_status = 'DONE'
+    else:
+      current_status = data.get('current_status')
+    return current_status
+
+  @classmethod
+  def clean_remote_scheduled_datetime(cls, data: dict) -> dt.datetime | None:
+    if scheduled_datetime := data.get('last_sent_date'):
+      # Not sure why this ts_format is different
+      return to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')
+
+
+# DONE
+class CampaignActivityRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle scheduling."""
+
+  def create(self, obj: CampaignActivity) -> NoReturn:
+    message = (
+      "ConstantContact API does not support creating CampaignActivities. "
+      "They are created during the creation of an EmailCampaign."
+    )
+    raise NotImplementedError(message)
+
+  def update(self, obj: Model, send_preview: bool = False) -> Model:
+    """Update CampaignActivity on CTCT servers.
 
     Notes
     -----
-    This method will also create the new `primary_email` and `permalink`
-    CampaignActivities on CTCT and associate the `primary_email` one
-    with the new EmailCampaign in the database.
+    CampaignActivities can only be updated if their associated EmailCampaign
+    is in DRAFT or SENT status. If the EmailCampaign is already scheduled,
+    we make an API call to unschedule it and then re-schedule it after
+    updates were made. If you wish to send a new preview out after the activity
+    has been updated, you can set `send_preview = True`.
 
     """
 
-    # Set name and initialize the CampaignActivity object (do not create it!)
-    activity = CampaignActivity(
-      campaign=self,
-      role='primary_email',
-    )
+    if obj.role != 'primary_email':
+      message = (
+        f'CampaignActivity with role `{obj.role}` not supported yet.'
+      )
+      raise NotImplementedError(message)
 
-    # Create EmailCampaign (and CampaignActivities) on CTCT servers
-    response = requests.post(
-      url=self.get_url(method='POST'),
-      headers=self.headers,
+    if was_scheduled := (obj.campaign.current_status == 'SCHEDULED'):
+      self.unschedule(obj)
+
+    obj = super().update(obj)
+
+    if send_preview:
+      self.send_preview(obj)
+
+    if was_scheduled:
+      self.schedule(obj)
+
+    return obj
+
+  def send_preview(
+    self,
+    obj: CampaignActivity,
+    recipients: Optional[list[str]] = None,
+    message: Optional[str] = None,
+  ) -> None:
+    """Sends a preview of the EmailCampaign."""
+
+    if recipients is None:
+      recipients = getattr(settings, 'CTCT_PREVIEW_RECIPIENTS', settings.MANAGERS)  # noqa: 501
+      recipients = [email for (name, email) in recipients]
+
+    if message is None:
+      message = getattr(settings, 'CTCT_PREVIEW_MESSAGE', '')
+
+    self.check_api_limit()
+    response = self.session.post(
+      url=self.get_url(
+        method='POST',
+        api_id=obj.api_id,
+        endpoint_suffix='/tests',
+      ),
       json={
-        'name': self.name,
-        'email_campaign_activities': [activity.serialize()],
+        'email_addresses': recipients,
+        'personal_message': message,
       },
     )
+    self.raise_or_json(response)
 
-    if response.status_code == 409:
-      # EmailCampaign name not unique, fetch existing EmailCampaign from CTCT
-      ctct_obj = self.ctct_read(name=self.name)
-    else:
-      ctct_obj = self.raise_or_json(response)
+  def schedule(self, obj: CampaignActivity, update_first: bool = True) -> None:
+    """Schedules the `primary_email` CampaignActivity.
 
-    # Set field values that `deserialize(ctct_obj)` doesn't have access to
-    ctct_obj['action'] = self.action
+    Notes
+    -----
+    Recipients must be set before scheduling; if recipients have already been
+    set, this can be skipped by setting `update_first=False`.
 
-    # Get the associated CampaignActivity ID and save
-    for campaign_activity in ctct_obj['campaign_activities']:
-      if campaign_activity['role'] == 'primary_email':
-        activity.api_id = campaign_activity['campaign_activity_id']
-        activity.save(save_to_ctct=False)
-        break
+    """
 
-    # Schedule and send preview
-    if self.action == 'CREATE':
-      activity.ctct_send_preview()
-      self.current_status = 'DRAFT'
-    elif self.action == 'SCHEDULE':
-      activity.ctct_send_preview()
-      activity.ctct_schedule()
-      self.current_status = 'SCHEDULED'
-    elif self.campaign.action == 'UNSCHEDULE':
-      activity.ctct_unschedule()
-      self.current_status = 'DRAFT'
-    self.action = 'NONE'
+    # Validate role and scheduled_datetime
+    if obj.role != 'primary_email':
+      message = (
+        f"Cannot schedule CampaignActivities with role '{obj.role}'."
+      )
+      raise ValueError(message)
 
-    # Update CTCT response with local field values
-    ctct_obj.update({
-      'current_status': self.current_status,
-      'action': self.action,
-    })
+    if obj.scheduled_datetime is None:
+      message = "Must specify `scheduled_datetime`!"
+      raise ValueError(message)
 
-    return ctct_obj
+    # Receipients must be set before scheduling
+    if update_first:
+      response = self.update(obj)
 
-  def ctct_update(self):
-    """Update associated CampaignActivity on CTCT servers."""
-    if self.action in ['SCHEDULE', 'UNSCHEDULE']:
-      activity = self.activities.get(role='primary_email')
-      method_name = f'ctct_{self.action.lower()}'
-      getattr(activity, method_name)()
-
-  def ctct_rename(self) -> dict:
-    """Rename EmailCampaign on CTCT servers."""
-    response = requests.patch(
-      url=self.get_url(method='PATCH'),
-      headers=self.headers,
-      json={'name': self.name},
+    # Finally, schedule the CampaignActivity
+    self.check_api_limit()
+    response = self.session.post(
+      url=self.get_url(
+        method='POST',
+        api_id=obj.api_id,
+        endpoint_suffix='/schedules',
+      ),
+      json={'scheduled_date': obj.scheduled_datetime.isoformat()},
     )
-    ctct_obj = self.raise_or_json(response)
-    return ctct_obj
+    self.raise_or_json(response)
+
+  def unschedule(self, obj: CampaignActivity) -> None:
+    """Unschedules the `primary_email` CampaignActivity."""
+    if obj.role == 'primary_email':
+      self.delete(obj, endpoint_suffix='/schedules')
+    else:
+      message = (
+        f"Cannot unschedule CampaignActivities with role '{obj.role}'."
+      )
+      raise ValueError(message)
 
 
-# TODO: ctct_save, ctct_update, ctct_send_preview, ctct_schedule/unschedule
-# TODO: get_preview_recipients, get_preview_message
+# DONE
 class CampaignActivity(CTCTModel):
   """Django implementation of a CTCT CampaignActivity.
 
@@ -1509,40 +1760,68 @@ class CampaignActivity(CTCTModel):
 
   API_ENDPOINT = '/emails/activities'
   API_ID_LABEL = 'campaign_activity_id'
-  API_BODY_FIELDS = (
-    'format_type',
+  API_EDITABLE_FIELDS = (
     'from_name',
     'from_email',
     'reply_to_email',
     'subject',
-    'html_content',
     'preheader',
+    'html_content',
     'physical_address_in_footer',
   )
+  API_READONLY_FIELDS = (
+    'role',
+    'current_status',
+    'format_type',
+  )
+  API_GET_QUERIES = {
+    'include': ','.join([
+      # 'physical_address_in_footer',
+      # 'permalink_url',
+      'html_content',
+      # 'document_properties',
+    ]),
+  }
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = CampaignActivityRemoteManager()
 
   ROLES = (
     ('primary_email', 'Primary Email'),
     ('permalink', 'Permalink'),
     ('resend', 'Resent'),
   )
-  MODERN_CUSTOM_CODE = 5
+  FORMAT_TYPES = (
+    (1, 'Custom code (API v2)'),
+    (2, 'CTCT UI (2nd gen)'),
+    (3, 'CTCT UI (3rd gen)'),
+    (4, 'CTCT UI (4th gen)'),
+    (5, 'Custom code (API v3)'),
+  )
+  MISSING_SUBJECT = 'No Subject'
 
   campaign = models.ForeignKey(
     EmailCampaign,
     on_delete=models.CASCADE,
     to_field='api_id',
-    related_name='activities',
+    related_name='campaign_activities',
     verbose_name=_('Campaign'),
   )
-  role = models.CharField(
-    max_length=25,
-    choices=ROLES,
-    default='primary_email',
-    verbose_name=_('Role'),
+
+  # API editable fields
+  from_name = models.CharField(
+    max_length=255,
+    default=settings.CTCT_FROM_NAME,
+    verbose_name=_('From Name'),
   )
-  contact_lists = models.ManyToManyField(
-    ContactList,
-    verbose_name=_('Contact Lists'),
+  from_email = models.EmailField(
+    default=settings.CTCT_FROM_EMAIL,
+    verbose_name=_('From Email'),
+  )
+  reply_to_email = models.EmailField(
+    default=getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL),
+    verbose_name=_('Reply-to Email'),
   )
   subject = models.CharField(
     max_length=200,
@@ -1565,11 +1844,31 @@ class CampaignActivity(CTCTModel):
     verbose_name=_('HTML Content'),
     help_text=_('The HTML content for the email campaign activity'),
   )
+  contact_lists = models.ManyToManyField(
+    ContactList,
+    through='CampaignActivityAndContactList',
+    related_name='campaign_activities',
+    verbose_name=_('Contact Lists'),
+  )
 
-  format_type = MODERN_CUSTOM_CODE
-  from_email = settings.CTCT_FROM_EMAIL
-  reply_to_email = getattr(settings, 'CTCT_REPLY_TO_EMAIL', from_email)
-  from_name = settings.CTCT_FROM_NAME
+  # API read-only fields
+  role = models.CharField(
+    max_length=25,
+    choices=ROLES,
+    default='primary_email',
+    verbose_name=_('Role'),
+  )
+  current_status = models.CharField(
+    choices=EmailCampaign.STATUSES,
+    max_length=20,
+    default='NONE',
+    verbose_name=_('Current Status'),
+  )
+  format_type = models.IntegerField(
+    choices=FORMAT_TYPES,
+    default=5,  # CustomCode API v3
+    verbose_name=_('Format Type'),
+  )
 
   class Meta:
     verbose_name = _('Email Campaign Activity')
@@ -1607,106 +1906,81 @@ class CampaignActivity(CTCTModel):
       data['contact_list_ids'] = contact_lists
     return data
 
-  def ctct_save(self) -> None:
-    """Updates CampaignActivity on CTCT servers.
+  @classmethod
+  def clean_remote_string_with_default(
+    cls,
+    field_name: str,
+    data: dict,
+    default: Optional[str] = None,
+  ) -> Optional[str]:
 
-    Notes
-    -----
-    Unlike other models, this method does NOT return a `ctct_obj`
-    dictionary since the "schedule" and "unschedule" responses
-    from CTCT do not contain the entire CampaignActivity object.
+    if default is None:
+      default = cls._meta.get_field(field_name).default
+      if default is NOT_PROVIDED:
+        message = _(
+          f"Must provide a default value for {cls.__name__}.{field_name}."
+        )
+        raise ValueError(message)
 
-    """
-
-    if self.role != 'primary_email':
-      message = (
-        f'CampaignActivity with role `{self.role}` not supported yet.'
-      )
-      raise NotImplementedError(message)
+    if field_name in data:
+      # If ConstantContact sends a `None` value, we get the default value
+      s = data[field_name] or default
     else:
-      # Primary Email Activities can only be updated, not created
-      self.ctct_update()
+      # A return value of `None` will remove the field from the cleaned dict
+      s = None
 
-  def ctct_update(self) -> dict:
-    """Update CampaignActivity on CTCT servers."""
+    return s
 
-    # Can only update if status is in DRAFT or SENT status
-    if self.campaign.current_status == 'SCHEDULED':
-      self.ctct_unschedule()
+  @classmethod
+  def clean_remote_from_name(cls, data: dict) -> Optional[str]:
+    return cls.clean_remote_string_with_default('from_name', data)
 
-    # Update the CampaignActivity and send updated preview
-    ctct_obj = super().ctct_update()
-    self.ctct_send_preview()
+  @classmethod
+  def clean_remote_from_email(cls, data: dict) -> Optional[str]:
+    return cls.clean_remote_string_with_default('from_email', data)
 
-    # Re-schedule if EmailCampaign was originally scheduled
-    if self.campaign.current_status == 'SCHEDULED':
-      self.ctct_schedule()
+  @classmethod
+  def clean_remote_reply_to_email(cls, data: dict) -> Optional[str]:
+    return cls.clean_remote_string_with_default('reply_to_email', data)
 
-    return ctct_obj
+  @classmethod
+  def clean_remote_subject(cls, data: dict) -> Optional[str]:
+    """Pass a `default` here so it won't appear in admin forms."""
+    default = cls.MISSING_SUBJECT
+    return cls.clean_remote_string_with_default('subject', data, default)
 
-  def ctct_send_preview(self, user) -> None:
-    """Sends preview email for approval."""
-    response = requests.post(
-      url=self.get_url(method='POST', suffix_endpoint='/tests'),
-      headers=self.headers,
-      json={
-        'email_addresses': self.get_preview_recipients(),
-        'personal_message': self.get_preview_message(user),
-      },
-    )
-    self.raise_or_json(response)
+  @classmethod
+  def clean_remote_contact_lists(cls, data: dict) -> list[str]:
+    return data.pop('contact_list_ids', [])
 
-  def ctct_schedule(self) -> None:
-    """Schedules the `primary_email` CampaignActivity.
 
-    Notes
-    -----
-    Recipients must be set before scheduling.
+# DONE
+class CampaignActivityAndContactList(models.Model):
+  """Custom through model that uses CTCT API ids.
 
-    """
+  Notes
+  -----
+  In order to bulk import the ManyToMany relationship between CampaignActivity
+  and ContactList, we create instances of the associated ThroughModel using the
+  API ids of CampaignActivity and ContactList. However, Django currently does
+  not support setting `to_field` in the Django-created ThroughModel, so we must
+  create our own ThroughModel in order specify the `to_field` values for the
+  ForeignKeys.
 
-    if self.campaign.scheduled_datetime is None:
-      message = "Must specify `scheduled_datetime`!"
-      raise ValueError(message)
+  """
 
-    # Set recipients on CTCT
-    response = requests.put(
-      url=self.get_url(method='PUT'),
-      headers=self.headers,
-      json=self.serialize(),
-    )
-    self.raise_or_json(response)
+  is_through_model = True
 
-    # Then schedule the CampaignActivity
-    response = requests.post(
-      url=self.get_url(method='POST', suffix_endpoint='/schedules'),
-      headers=self.headers,
-      json={'scheduled_date': self.campaign.scheduled_datetime.isoformat()},
-    )
-    self.raise_or_json(response)
-
-  def ctct_unschedule(self) -> None:
-    """Unschedules the `primary_email` CampaignActivity."""
-    super().ctct_delete(suffix_endpoint='/schedules')
-
-  def get_preview_recipients(self) -> list[str]:
-    """Determines who receives the CTCT preview emails."""
-    recipients = getattr(settings, 'CTCT_PREVIEW_RECIPIENTS', settings.MANAGERS)  # noqa: 501
-    return [email for (name, email) in recipients]
-
-  def get_preview_message(self, user) -> str:
-    """Writes the message sent with preview emails."""
-    message = _(
-      f'Please let {user.first_name} {user.last_name} know if you have edits.'
-    )
-    if self.campaign.current_status == 'SCHEDULED':
-      datetime = self.campaign.scheduled_datetime.strftime(
-        settings['DATETIME_FORMAT']
-      )
-      message += _(
-        f' This campaign is scheduled to be sent on {datetime}.'
-      )
-    return message
+  campaignactivity = models.ForeignKey(
+    CampaignActivity,
+    on_delete=models.CASCADE,
+    to_field='api_id',
+  )
+  contactlist = models.ForeignKey(
+    ContactList,
+    on_delete=models.CASCADE,
+    to_field='api_id',
+  )
 
 
 # @receiver(post_save)
@@ -1722,14 +1996,14 @@ class CampaignActivity(CTCTModel):
 #     return
 #   elif isinstance(instance, EmailCampaign) and (update_fields == ['name']):
 #     if instance.save_to_ctct == 'sync':
-#       ctct_rename_job(instance)
+#       ctct_rename_task(instance)
 #     elif instance.save_to_ctct == 'async':
-#       ctct_rename_job.delay(instance)
+#       ctct_rename_task.delay(instance)
 #   elif isinstance(instance, CTCTModel):
 #     if instance.save_to_ctct == 'sync':
-#       ctct_save_job(instance)
+#       ctct_save_task(instance)
 #     elif instance.save_to_ctct == 'async':
-#       ctct_save_job.delay(instance)
+#       ctct_save_task.delay(instance)
 #
 #
 # @receiver(pre_delete)
@@ -1739,9 +2013,9 @@ class CampaignActivity(CTCTModel):
 #     return
 #   elif isinstance(instance, CTCTModel):
 #     if instance.save_to_ctct == 'sync':
-#       ctct_delete_job(instance)
+#       ctct_delete_task(instance)
 #     elif instance.save_to_ctct == 'async':
-#       ctct_delete_job.delay(instance)
+#       ctct_delete_task.delay(instance)
 #
 #
 # @receiver(m2m_changed, sender=Contact.list_memberships.through)
@@ -1752,13 +2026,13 @@ class CampaignActivity(CTCTModel):
 #
 #     if isinstance(instance, Contact):
 #       if instance.save_to_ctct == 'sync':
-#         ctct_update_lists_job(instance)
+#         ctct_update_lists_task(instance)
 #       elif instance.save_to_ctct == 'async':
-#         ctct_update_lists_job.delay(instance)
+#         ctct_update_lists_task.delay(instance)
 #
 #     elif isinstance(instance, ContactList):
 #       contacts = Contact.objects.filter(pk__in=kwargs['pk_set'])
 #       if instance.save_to_ctct == 'async':
-#         ctct_add_list_memberships_job(instance, contacts)
+#         ctct_add_list_memberships_task(instance, contacts)
 #       elif instance.save_to_ctct == 'async':
-#         ctct_add_list_memberships_job.delay(instance, contacts)
+#         ctct_add_list_memberships_task.delay(instance, contacts)
