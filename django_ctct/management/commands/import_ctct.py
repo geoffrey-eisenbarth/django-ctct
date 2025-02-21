@@ -1,7 +1,8 @@
 from argparse import ArgumentParser
+from collections import defaultdict
+from operator import attrgetter
 from typing import Optional
 
-from requests.exceptions import HTTPError
 from tqdm import tqdm
 
 from django.core.management.base import BaseCommand
@@ -18,8 +19,14 @@ class Command(BaseCommand):
 
   Notes
   -----
-  # TODO: Explain EmailCampaigns/CampaignActivity and
-  # potential requests limits of 10,000 per day.
+  CTCT does not provide an endpoint for fetching bulk CampaignActivities.
+  As a result, we must loop through the EmailCampaigns, make a request to get
+  the associated CampaignActivities, and then make a second request to get the
+  details of the CampaignActivity.
+
+  As a result, importing CampaignActivities will be slow, and running it
+  multiple times may result in exceeding CTCT's 10,000 requests per day
+  limit.
 
   """
 
@@ -43,11 +50,9 @@ class Command(BaseCommand):
     verb = 'Imported' if (update_fields is None) else 'Updated'
 
     if getattr(Model, 'is_through_model', False):
-      # TODO: Should we delete all ThroughModel instances each time?
-      objs = Model.objects.bulk_create(
-        objs=objs,
-        update_conflicts=False,
-      )
+      breakpoint()
+      Model.objects.all().delete()
+      objs = Model.objects.bulk_create(objs)
     else:
       # Perform upsert using `bulk_create()`
       if update_fields is None:
@@ -85,59 +90,46 @@ class Command(BaseCommand):
     for RelatedModel, objs in related_objs.items():
       objs = self.upsert(RelatedModel, objs)
 
-  # TODO: Need to finish this, but hit 10k limit
   def import_campaign_activities(self) -> None:
     """Imports CampaignActivities from CTCT into Django's database."""
 
-    objs = []
+    objs, related_objs = [], defaultdict(list)
 
     EmailCampaign.remote.connect()
     CampaignActivity.remote.connect()
 
     # Use the EmailCampaign detail endpoint to get CampaignActivity api_ids
     for api_id in tqdm(EmailCampaign.objects.values_list('api_id', flat=True)):
-      try:
-        _, related_objs = EmailCampaign.remote.get(api_id=api_id)
-      except HTTPError as e:
-        if e.response is None:
-          breakpoint()
-          # <CampaignActivity: COLUMN 2025-01-27, Primary Email>
-          # '8484d53f-8648-4bd4-8b42-423bcbbd7ab7'
-        elif e.response.status_code != 404:
-          # Allow 404s
-          raise e
+      _, _related_objs = EmailCampaign.remote.get(api_id)
 
       # Now we use the CampaignActivity detail endpoint to get remaining fields
       primary_emails = filter(
         lambda obj: obj.role == 'primary_email',
-        related_objs.get(CampaignActivity, [])
+        _related_objs.get(CampaignActivity, [])
       )
-      for primary_email in primary_emails:
-        try:
-          obj, related_objs = CampaignActivity.remote.get(api_id=primary_email.api_id)
-        except HTTPError as e:
-          if e.response is None:
-            breakpoint()
-          elif e.response.status_code != 404:
-            # Allow 404s
-            raise e
+      for api_id in map(attrgetter('api_id'), primary_emails):
+        obj, _related_objs = CampaignActivity.remote.get(api_id)
 
-        # TODO: We should be getting ContactList ManyToMany here
-        # TODO: Need to create custom ThroughModel?
-        if related_objs:
-          breakpoint()
-        objs.append(obj)
+        # Store objects for later
+        # NOTE We updated `related_obj` with the values from `_related_objs`
+        for RelatedModel, instances in _related_objs.items():
+          related_objs[RelatedModel].extend(instances)
+        if obj is not None:
+          objs.append(obj)
 
+    # Upsert objects and related objects
     update_fields = ['role', 'subject', 'preheader', 'html_content']
-    breakpoint()
     objs = self.upsert(CampaignActivity, objs, update_fields=update_fields)
+
+    for RelatedModel, objs in related_objs.items():
+      objs = self.upsert(RelatedModel, objs)
 
   def import_campaign_stats(self):
     """"Imports EmailCampaign stats from CTCT into Django's database."""
 
     endpoint = '/reports/summary_reports/email_campaign_summaries'
     update_fields = [
-      'current_status', 'scheduled_datetime',
+      'current_status', 'created_at', 'updated_at', 'scheduled_datetime',
       'sends', 'opens', 'clicks', 'forwards',
       'optouts', 'abuse', 'bounces', 'not_opened',
     ]
