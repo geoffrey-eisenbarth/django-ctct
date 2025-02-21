@@ -18,22 +18,17 @@ from django.db import models
 from django.db.models import Model
 from django.db.models.fields import NOT_PROVIDED
 from django.db.models.query import QuerySet
-from django.db.models.signals import post_save, m2m_changed, pre_delete
-from django.dispatch import receiver
 from django.http import Http404
 from django.urls import reverse
 from django.utils import timezone, formats
 from django.utils.translation import gettext_lazy as _
 
+from django_tasks import task
+
 from phonenumber_field.phonenumber import PhoneNumber
 from phonenumber_field.modelfields import PhoneNumberField
 
 from django_ctct.utils import to_dt, get_related_fields
-
-from django_ctct.tasks import (
-  ctct_save_task, ctct_delete_task, ctct_rename_task,
-  ctct_update_lists_task, ctct_add_list_memberships_task,
-)
 
 
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -257,6 +252,7 @@ class RemoteManager(models.Manager):
     """Honor the API's rate limit."""
     pass
 
+  @task()
   def create(self, obj: Model) -> Model:
     """Creates an existing Django object on the remote server.
 
@@ -352,6 +348,7 @@ class RemoteManager(models.Manager):
 
     return objs, related_objs
 
+  @task()
   def update(self, obj: Model) -> Model:
     """Update exisiting Django object on the remote server.
 
@@ -384,6 +381,7 @@ class RemoteManager(models.Manager):
 
     return obj
 
+  @task()
   def delete(self, obj: Model, endpoint_suffix: Optional[str] = None) -> None:
     """Delete existing Django object on the remote server.
 
@@ -1981,58 +1979,3 @@ class CampaignActivityAndContactList(models.Model):
     on_delete=models.CASCADE,
     to_field='api_id',
   )
-
-
-# @receiver(post_save)
-# def ctct_save_signal(
-#   sender: Type[Model],
-#   instance: Model,
-#   created: bool,
-#   update_fields: Optional[list],
-#   **kwargs,
-# ) -> None:
-#   """Create or update the instance on CTCT servers."""
-#   if isinstance(instance, CTCTLocalModel):
-#     return
-#   elif isinstance(instance, EmailCampaign) and (update_fields == ['name']):
-#     if instance.save_to_ctct == 'sync':
-#       ctct_rename_task(instance)
-#     elif instance.save_to_ctct == 'async':
-#       ctct_rename_task.delay(instance)
-#   elif isinstance(instance, CTCTModel):
-#     if instance.save_to_ctct == 'sync':
-#       ctct_save_task(instance)
-#     elif instance.save_to_ctct == 'async':
-#       ctct_save_task.delay(instance)
-#
-#
-# @receiver(pre_delete)
-# def ctct_delete_signal(sender, instance, **kwargs) -> None:
-#   """Delete the instance from CTCT servers."""
-#   if isinstance(instance, CTCTLocalModel):
-#     return
-#   elif isinstance(instance, CTCTModel):
-#     if instance.save_to_ctct == 'sync':
-#       ctct_delete_task(instance)
-#     elif instance.save_to_ctct == 'async':
-#       ctct_delete_task.delay(instance)
-#
-#
-# @receiver(m2m_changed, sender=Contact.list_memberships.through)
-# def ctct_update_contact_lists(sender, instance, action, **kwargs):
-#   """Updates a Contact's list membership on CTCT servers."""
-#
-#   if action in ['post_add', 'post_remove', 'post_clear']:
-#
-#     if isinstance(instance, Contact):
-#       if instance.save_to_ctct == 'sync':
-#         ctct_update_lists_task(instance)
-#       elif instance.save_to_ctct == 'async':
-#         ctct_update_lists_task.delay(instance)
-#
-#     elif isinstance(instance, ContactList):
-#       contacts = Contact.objects.filter(pk__in=kwargs['pk_set'])
-#       if instance.save_to_ctct == 'async':
-#         ctct_add_list_memberships_task(instance, contacts)
-#       elif instance.save_to_ctct == 'async':
-#         ctct_add_list_memberships_task.delay(instance, contacts)
