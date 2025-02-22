@@ -62,32 +62,30 @@ def ctct_update_contact_lists(sender, instance, action, **kwargs):
 
 
 # TODO: Refactor these tasks
-@task
-def ctct_update_lists_task(contact: 'Contact') -> None:
-  """Update ContactLists on CTCT, or delete Contact if no ContactLists.
-
-  Notes
-  -----
-  Due to the way Django admin saves related models, I haven't been able
-  to determine a good way to address this other than just delaying this
-  method for a few minutes.
-
-  The primary issue is that we want to make sure that a Contact.ctct_save()
-  call isn't made after this call, since that will revive the Contact in
-  the event that they had been deleted from CTCT servers due to no longer
-  belonging to any ContactLists (CTCT requires that Contacts must belong to
-  at least one ContactList).
-
-  """
-
-  if contact.api_id is not None:
-    sleep(60 * 1)  # 1 minute
-    contact.ctct_update_lists()
-
-
-@task
-def ctct_add_list_memberships_task(
-  contact_list: 'ContactList',
-  contacts: QuerySet['Contact'],
-) -> None:
-  contact_list.ctct_add_list_memberships(contacts)
+# def ctct_update_lists_task(contact: 'Contact') -> None:
+#   """Update ContactLists on CTCT, or delete Contact if no ContactLists.
+# 
+#   Notes
+#   -----
+#   Due to the way Django admin saves related models, I haven't been able
+#   to determine a good way to address this other than just delaying this
+#   method for a few minutes.
+# 
+#   The primary issue is that we want to make sure that a Contact.ctct_save()
+#   call isn't made after this call, since that will revive the Contact in
+#   the event that they had been deleted from CTCT servers due to no longer
+#   belonging to any ContactLists (CTCT requires that Contacts must belong to
+#   at least one ContactList).
+# 
+#   """
+# 
+#   if contact.api_id is not None:
+#     sleep(60 * 1)  # 1 minute
+#     contact.ctct_update_lists()
+# 
+# 
+# def ctct_add_list_memberships_task(
+#   contact_list: 'ContactList',
+#   contacts: QuerySet['Contact'],
+# ) -> None:
+#   contact_list.ctct_add_list_memberships(contacts)
