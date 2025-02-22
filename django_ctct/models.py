@@ -430,6 +430,7 @@ class CTCTModel(Model):
     default=None,  # Models often created without CTCT IDs
     unique=True,   # Note: None != None for uniqueness check
     blank=True,
+    verbose_name=_('API ID'),
   )
 
   class Meta:
@@ -705,6 +706,10 @@ class CustomField(CTCTModel):
     auto_now=True,
     verbose_name=_('Updated At'),
   )
+
+  class Meta:
+    verbose_name = _('Custom Field')
+    verbose_name_plural = _('Custom Fields')
 
   def __str__(self) -> str:
     return self.label
