@@ -1,10 +1,3 @@
-* figure out from_api()
-
-
-* grep -rl `\.post`, `posts_post_change`, and `posts\.`
-* grep -rl `accounts\.`
-* Figure out .html_content()
-* Do we want Address() model? or is that more of Contact Database thing?
 * README.md
   * how to install
   * required settings
