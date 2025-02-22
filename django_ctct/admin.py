@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
   Token, ContactList,
-  Contact, ContactStreetAddress, ContactPhoneNumber, ContactNote,
+  Contact, CustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity
 )
 
@@ -33,14 +33,14 @@ class ViewModelAdmin(admin.ModelAdmin):
 
   def get_readonly_fields(self, request, obj=None):
     """Prevent updates in the Django admin."""
-    if obj:
-      readonly_fields = [
+    if obj is not None:
+      readonly_fields = (
         field.name
         for field in obj._meta.fields
         if field.name != 'active'
-      ]
+      )
     else:
-      readonly_fields = []
+      readonly_fields = tuple()
     return readonly_fields
 
   def has_delete_permission(self, request, obj=None):
@@ -127,11 +127,11 @@ class ContactListAdmin(admin.ModelAdmin):
   synced.short_description = _('Synced')
 
   def membership(self, obj: ContactList) -> int:
-    return obj.contacts.count()
+    return obj.members.all().count()
   membership.short_description = _('Membership')
 
   def optouts(self, obj: ContactList) -> int:
-    return obj.contacts.exclude(opt_out_source='').count()
+    return obj.members.exclude(opt_out_source='').count()
   optouts.short_description = _('Opt Outs')
 
   # ChangeView
@@ -146,17 +146,32 @@ class ContactListAdmin(admin.ModelAdmin):
   )
 
 
+@admin.register(CustomField)
+class CustomFieldAdmin(admin.ModelAdmin):
+  """Admin functionality for CTCT CustomFields."""
+
+  # ListView
+  list_display = (
+    'label',
+    'type',
+    'api_id',
+  )
+
+  # ChangeView
+  readonly_fields = ('api_id', )
+
+
 class ContactStatusFilter(admin.SimpleListFilter):
   """Simple filter for CTCT Status."""
 
   STATUSES = (
-    ('sync', _('Synced')),
+    ('synced', _('Synced')),
     ('not_synced', _('Not Synced')),
     ('opted_out', _('Opted Out')),
   )
 
-  title = 'CTCT Status'
-  parameter_name = 'ctct'
+  title = 'Status'
+  parameter_name = 'status'
 
   def lookups(
     self,
@@ -170,7 +185,7 @@ class ContactStatusFilter(admin.SimpleListFilter):
     request: HttpRequest,
     queryset: QuerySet,
   ) -> QuerySet[Contact]:
-    if self.value() == 'sync':
+    if self.value() == 'synced':
       queryset = queryset.filter(api_id__isnull=False)
     elif self.value() == 'not_synced':
       queryset = queryset.filter(api_id__isnull=True)
@@ -209,7 +224,7 @@ class ContactNoteInline(admin.TabularInline):
   extra = 0
   max_num = Contact.API_MAX_NOTES
 
-  readonly_fields = ['author', 'created_at']
+  readonly_fields = ('author', 'created_at')
 
   def has_change_permission(
     self,
@@ -237,24 +252,21 @@ class ContactAdmin(admin.ModelAdmin):
     'name',
     'job',
     'updated_at',
-    'ctct',
+    'status',
   )
   list_filter = (
     ContactStatusFilter,
-    'list_memberships',
+    'list_memberships',  # TODO: this doesn't work?
   )
   empty_value_display = '(None)'
 
-  def ctct(self, obj: Contact) -> str:
+  def status(self, obj: Contact) -> str:
     if not obj.api_id:
-      text = 'Not Synced'
-      color = 'bad'
+      text, color = 'Not Synced', 'bad'
     elif obj.opted_out:
-      text = 'Opted Out'
-      color = 'warn'
+      text, color = 'Opted Out', 'warn'
     else:
-      text = 'Synced'
-      color = 'ok'
+      text, color = 'Synced', 'ok'
 
     html = (
       f'<span class="{color} badge">'
@@ -262,21 +274,24 @@ class ContactAdmin(admin.ModelAdmin):
       '</span>'
     )
     return mark_safe(html)
-  ctct.short_description = 'CTCT'
+  status.short_description = _('Status')
 
   # ChangeView
   fieldsets = (
     (None, {
       'fields': (
         'email',
-        ('first_name', 'last_name'),
-        ('honorific', 'suffix'),
-        ('job_title', 'company_name'),
+        'honorific',
+        'first_name',
+        'last_name',
+        'suffix',
+        'job_title',
+        'company_name',
       ),
     }),
     ('CONTACT LISTS', {
       'fields': (
-        #'list_memberships',  # TODO: This breaks if using Custom ThroughModel?
+        # 'list_memberships',  # TODO: This breaks if using Custom ThroughModel?
         ('opt_out_source', 'opt_out_date', 'opt_out_reason'),
       ),
     }),
@@ -300,14 +315,8 @@ class ContactAdmin(admin.ModelAdmin):
     request: HttpRequest,
     obj: Optional[Contact] = None,
   ) -> List[str]:
-    readonly_fields = [
-      'created_at',
-      'updated_at',
-      'opt_out_source',
-      'opt_out_date',
-      'opt_out_reason',
-    ]
-    if getattr(obj, 'opted_out', False) and not request.user.is_superuser:
+    readonly_fields = Contact.API_READONLY_FIELDS
+    if obj.opted_out and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
 
@@ -321,18 +330,18 @@ class ContactAdmin(admin.ModelAdmin):
     if formset.model == ContactNote:
       instances = formset.save(commit=False)
       for obj in formset.deleted_objects:
-        obj.delete()
+        obj.delete()      # TODO: Hit API?
       for instance in instances:
         if getattr(instance, 'author', None) is None:
           instance.author = request.user
-        instance.save()
-      formset.save_m2m()
+        instance.save()   # TODO: Hit API?
+      formset.save_m2m()  # TODO: Hit API?
     else:
       return super().save_formset(request, form, formset, change)
 
 
 @admin.register(ContactNote)
-class ContactNoteAdmin(admin.ModelAdmin):
+class ContactNoteAdmin(ViewModelAdmin):
   """Admin functionality for ContactNotes."""
 
   # ListView
@@ -350,54 +359,68 @@ class ContactNoteAdmin(admin.ModelAdmin):
   list_display = (
     'contact',
     'content',
-    'author',
     'created_at',
+    'author',
   )
   list_filter = (
     'created_at',
     'author',
   )
 
-  # ChangeView
-  fieldsets = (
-    (None, {
-      'fields': (
-        'contact',
-        'content',
-      ),
-    }),
-    ('INTERNAL', {
-      'fields': (
-        'author',
-        'created_at',
-      ),
-    }),
+  def has_delete_permission(self, request, obj=None):
+    """Allow superusers to delete Notes."""
+    return request.user.is_superuser
+
+
+class CampaignActivityInlineForm(forms.ModelForm):
+  """Custom widget choices for ContactList admin."""
+
+  ACTIONS = (
+    ('NONE', 'Select Action'),
+    ('CREATE', 'Create Draft'),
+    ('SCHEDULE', 'Schedule'),
+    ('UNSCHEDULE', 'Unschedule'),
   )
-  readonly_fields = (
-    'contact',
-    'author',
-    'created_at',
+  # TODO: Is this needed?
+  ACTIONS_FROM_STATUS = {
+    'NONE': ACTIONS[:3],
+    'DRAFT': ACTIONS[:1] + ACTIONS[2:4],
+    'SCHEDULED': ACTIONS[:1] + ACTIONS[3:4],
+    'UNSCHEDULED': ACTIONS[:1] + ACTIONS[2:3],
+    'EXECUTING': ACTIONS[:1],
+    'DONE': ACTIONS[:1],
+    'ERROR': ACTIONS[:1],
+    'REMOVED': ACTIONS[:1],
+  }
+
+  action = forms.ChoiceField(
+    choices=ACTIONS,
   )
 
-  def has_change_permission(
-    self,
-    request: HttpRequest,
-    obj: Optional[ContactNote] = None,
-  ) -> bool:
-    return False
+  class Meta:
+    model = CampaignActivity
+    fields = '__all__'
 
-  def has_add_permission(
-    self,
-    request: HttpRequest,
-    obj: Optional[ContactNote] = None,
-  ) -> bool:
-    return False
+# TODO: Implement actions
+#    if self.action == 'CREATE':
+#      activity.ctct_send_preview()
+#      self.current_status = 'DRAFT'
+#    elif self.action == 'SCHEDULE':
+#      activity.ctct_send_preview()
+#      activity.ctct_schedule()
+#      self.current_status = 'SCHEDULED'
+#    elif self.campaign.action == 'UNSCHEDULE':
+#      activity.ctct_unschedule()
+#      self.current_status = 'DRAFT'
+#    self.action = 'NONE'
+
 
 
 class CampaignActivityInline(admin.StackedInline):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
+  form = CampaignActivityInlineForm
   exclude = ('api_id', )
 
   extra = 1
@@ -405,8 +428,14 @@ class CampaignActivityInline(admin.StackedInline):
 
   class Meta:
     widgets = {
-      'html_content': forms.Textarea,
+      'html_content': forms.Textarea,  # TODO: Allow user to set RichTextEditor?
     }
+
+  def get_readonly_fields(self, request, obj=None):
+    readonly_fields = CampaignActivity.API_READONLY_FIELDS
+    if obj and obj.current_status == 'DONE':
+      readonly_fields += CampaignActivity.API_EDITABLE_FIELDS
+    return readonly_fields
 
   # TODO?
   #def formfield_for_dbfield(
@@ -428,7 +457,6 @@ class EmailCampaignAdmin(admin.ModelAdmin):
   search_fields = ('name', )
   list_display = (
     'name',
-    'created_at',
     'updated_at',
     'current_status',
     'scheduled_datetime',
@@ -445,34 +473,41 @@ class EmailCampaignAdmin(admin.ModelAdmin):
       r = (obj.opens / obj.sends) if obj.sends else 0
       s = f'{r:0.2%}'
     else:
-      s = 'N/A'
+      s = '-'
     return s
   open_rate.admin_order_field = 'open_rate'
   open_rate.short_description = _('Open Rate')
 
   # ChangeView
-  fieldsets = (
-    (None, {
-      'fields': (
-      ),
-    }),
-    ('ANALYTICS', {
-      'fields': (
-        'sends', 'opens', 'clicks', 'forwards',
-        'optouts', 'abuse', 'bounces', 'not_opened',
-      ),
-    }),
-    ('INTERNAL', {
-      'fields': (
-      ),
-    }),
-  )
-  readonly_fields = (
-    'sends', 'opens', 'clicks', 'forwards',
-    'optouts', 'abuse', 'bounces', 'not_opened',
-  )
-
   inlines = (CampaignActivityInline, )
+
+  def get_fieldsets(self, request, obj=None):
+    if obj and (obj.current_status == 'DONE'):
+      fieldsets = (
+        (None, {
+          'fields': ('name', 'current_status', 'scheduled_datetime'),
+        }),
+        ('ANALYTICS', {
+          'fields': (
+            'sends', 'opens', 'clicks', 'forwards',
+            'optouts', 'abuse', 'bounces', 'not_opened',
+          ),
+        }),
+      )
+    else:
+      fieldsets = (
+        (None, {
+          'fields': ('name', 'current_status', 'scheduled_datetime'),
+        }),
+      )
+
+    return fieldsets
+
+  def get_readonly_fields(self, request, obj=None):
+    readonly_fields = EmailCampaign.API_READONLY_FIELDS
+    if obj and obj.current_status == 'DONE':
+      readonly_fields += ('scheduled_datetime', )
+    return readonly_fields
 
   def save_model(
     self,
@@ -489,7 +524,6 @@ class EmailCampaignAdmin(admin.ModelAdmin):
       ),
       'UPDATE': _(
         'The campaign has been updated and a preview has been sent out for approval.'  # noqa 501
-        'out for approval.'
       ),
       'SCHEDULE': _(
         'The campaign has been scheduled and a preview has been sent out for approval.'  # noqa 501
@@ -499,32 +533,3 @@ class EmailCampaignAdmin(admin.ModelAdmin):
       ),
     }[obj.action]
     self.message_user(request, message)
-
-# TODO: Implement actions
-#  ACTIONS = (
-#    ('NONE', 'Select Action'),
-#    ('CREATE', 'Create Draft'),
-#    ('SCHEDULE', 'Schedule'),
-#    ('UNSCHEDULE', 'Unschedule'),
-#  )
-#  ACTIONS_FROM_STATUS = {
-#    'NONE': ACTIONS[:3],
-#    'DRAFT': ACTIONS[:1] + ACTIONS[2:4],
-#    'SCHEDULED': ACTIONS[:1] + ACTIONS[3:4],
-#    'UNSCHEDULED': ACTIONS[:1] + ACTIONS[2:3],
-#    'EXECUTING': ACTIONS[:1],
-#    'DONE': ACTIONS[:1],
-#    'ERROR': ACTIONS[:1],
-#    'REMOVED': ACTIONS[:1],
-#  }
-#    if self.action == 'CREATE':
-#      activity.ctct_send_preview()
-#      self.current_status = 'DRAFT'
-#    elif self.action == 'SCHEDULE':
-#      activity.ctct_send_preview()
-#      activity.ctct_schedule()
-#      self.current_status = 'SCHEDULED'
-#    elif self.campaign.action == 'UNSCHEDULE':
-#      activity.ctct_unschedule()
-#      self.current_status = 'DRAFT'
-#    self.action = 'NONE'
