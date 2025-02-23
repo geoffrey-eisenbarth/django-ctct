@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 import datetime as dt
+import re
 from typing import Literal, Optional, NoReturn
 from urllib.parse import urlencode
 
 import jwt
 from ratelimit import limits, sleep_and_retry
-import re
 import requests
 from requests.exceptions import HTTPError
 from requests.models import Response
@@ -46,6 +46,7 @@ HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 # * tests
 
 
+# DONE
 class BaseRemoteManager(models.Manager):
 
   def get_url(
@@ -113,6 +114,7 @@ class BaseRemoteManager(models.Manager):
     return self._improperly_configured()
 
 
+# DONE
 class TokenRemoteManager(BaseRemoteManager):
 
   API_URL = 'https://authz.constantcontact.com/oauth2/default'
@@ -644,9 +646,9 @@ class ContactListRemoteManager(RemoteManager):
 
   def add_list_memberships(
     self,
-    contact_list: Optional['ContactList'] = None,
-    contact_lists: Optional[QuerySet['ContactList']] = None,
-    contacts: Optional[QuerySet['Contact']] = None,
+    contact_list: Optional[ContactList] = None,
+    contact_lists: Optional[QuerySet[ContactList]] = None,
+    contacts: Optional[QuerySet[Contact]] = None,
   ) -> None:
     """Adds multiple Contacts to (multiple) ContactLists."""
 
