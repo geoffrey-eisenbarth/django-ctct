@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 import datetime as dt
-from typing import Literal, Optional, Self, NoReturn
+from typing import Literal, Optional, NoReturn
+from urllib.parse import urlencode
 
 import jwt
 from ratelimit import limits, sleep_and_retry
@@ -18,7 +19,8 @@ from django.db import models
 from django.db.models import Model
 from django.db.models.fields import NOT_PROVIDED
 from django.db.models.query import QuerySet
-from django.http import Http404
+from django.http import HttpRequest, Http404
+from django.middleware.csrf import get_token as get_csrf_token
 from django.urls import reverse
 from django.utils import timezone, formats
 from django.utils.translation import gettext_lazy as _
@@ -34,8 +36,247 @@ from django_ctct.utils import to_dt, get_related_fields
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 
+# TODO:
+# * EmailCampaign.create()
+# * Contact.update_or_create()
+# * RemoteManager.update() / .create()
+# * EmailCampaign.current_status vs CampaignActivity.current_status
+# * How does task(queue_name=) work?
+# * admin.py
+# * tests
+
+
+class BaseRemoteManager(models.Manager):
+
+  def get_url(
+    self,
+    api_id: Optional[str] = None,
+    endpoint: Optional[str] = None,
+    endpoint_suffix: Optional[str] = None,
+  ) -> str:
+    endpoint = endpoint or self.model.API_ENDPOINT
+    if not endpoint.startswith(self.API_VERSION):
+      endpoint = f'{self.API_VERSION}{endpoint}'
+
+    url = f'{self.API_URL}{endpoint}'
+
+    if api_id:
+      url += f'/{api_id}'
+
+    if endpoint_suffix:
+      url += f'{endpoint_suffix}'
+
+    return url
+
+  def raise_or_json(self, response: Response) -> Optional[dict]:
+    if response.status_code == 204:
+      data = None
+    elif response.status_code == 404:
+      # Allow catching 404 separately from HTTPError
+      raise Http404
+    else:
+      data = response.json()
+
+    try:
+      response.raise_for_status()
+    except HTTPError:
+      if isinstance(data, list):
+        data = data[0]
+      # Models use 'error_message', Tokens use 'error_description'
+      error_message = data.get('error_message', data.get('error_description'))
+      message = f"[{response.status_code}] {error_message}"
+      raise HTTPError(message, response=response)
+
+    return data
+
+  def _improperly_configured(self):
+    message = "You must define this method on a child class."
+    raise ImproperlyConfigured(message)
+
+  def get_queryset(self):
+    """Prevent access to the db from within RemoteManager."""
+    return super().get_queryset().none()
+
+  def create(self):
+    return self._improperly_configured()
+
+  def get(self):
+    return self._improperly_configured()
+
+  def all(self):
+    return self._improperly_configured()
+
+  def update(self):
+    return self._improperly_configured()
+
+  def delete(self):
+    return self._improperly_configured()
+
+
+class TokenRemoteManager(BaseRemoteManager):
+
+  API_URL = 'https://authz.constantcontact.com/oauth2/default'
+  API_VERSION = '/v1'
+  API_SCOPES = (
+    'account_read',
+    'account_update',
+    'contact_data',
+    'campaign_data',
+    'offline_access',
+  )
+
+  def get_auth_url(self, request: HttpRequest) -> str:
+    """Returns a URL for logging into CTCT.com to grant permissions."""
+    endpoint = self.get_url(endpoint='/authorize')
+    data = {
+      'client_id': settings.CTCT_PUBLIC_KEY,
+      'redirect_uri': settings.CTCT_REDIRECT_URI,
+      'response_type': 'code',
+      'state': get_csrf_token(request),
+      'scope': '+'.join(self.API_SCOPES),
+    }
+    url = f"{endpoint}?{urlencode(data, safe='+')}"
+    return url
+
+  def connect(self) -> None:
+    self.session = requests.Session()
+    self.session.auth = (settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY)
+
+  def create(self, auth_code: str) -> Token:
+    """Creates the initial Token using an `auth_code` from CTCT.
+
+    Notes
+    -----
+    The value of CTCT_REDIRECT_URI must exactly match the value
+    specified in the developer's page on constantcontact.com.
+
+    """
+
+    response = self.session.post(
+      url=self.get_url(endpoint='/token'),
+      data={
+        'code': auth_code,
+        'redirect_uri': settings.CTCT_REDIRECT_URI,
+        'grant_type': 'authorization_code',
+      },
+    )
+    data = self.raise_or_json(response)
+    token = Token.objects.create(**data)
+    return token
+
+  def get(self) -> Token:
+    """Fetches most recent token, refreshing if necessary."""
+
+    token = self.model.objects.first()
+    if not token:
+      message = (
+        "No tokens in the database yet. "
+        f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
+      )
+      raise ValueError(message)
+
+    try:
+      token.decode()
+    except jwt.ExpiredSignatureError:
+      token = self.update(token)
+
+    return token
+
+  def update(self, token: Token) -> Token:
+    """Obtain a new Token from CTCT using the refresh code."""
+
+    response = self.session.post(
+      url=self.get_url(endpoint='/token'),
+      data={
+        'refresh_token': token.refresh_token,
+        'grant_type': 'refresh_token',
+      },
+    )
+    data = self.raise_or_json(response)
+    token = Token.objects.create(**data)
+    return token
+
+
+# DONE
+class Token(Model):
+  """Authorization token for CTCT API access.
+
+  Notes
+  -----
+  To get the latest Token, use the `get()` class method.
+
+  """
+
+  API_JWKS_URL = (
+    'https://identity.constantcontact.com/'
+    'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
+  )
+
+  TOKEN_TYPE = 'Bearer'
+  TOKEN_TYPES = (
+    (TOKEN_TYPE, TOKEN_TYPE),
+  )
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = TokenRemoteManager()
+
+  access_token = models.TextField(
+    verbose_name=_('Access Token'),
+  )
+  refresh_token = models.CharField(
+    max_length=50,
+    verbose_name=_('Refresh Token'),
+  )
+  token_type = models.CharField(
+    max_length=6,
+    choices=TOKEN_TYPES,
+    default=TOKEN_TYPE,
+    verbose_name=_('Token Type'),
+  )
+  scope = models.CharField(
+    max_length=255,
+    verbose_name=_('Scope'),
+  )
+  expires_in = models.IntegerField(
+    verbose_name=_('Expires In'),
+  )
+  created_at = models.DateTimeField(
+    auto_now=False,
+    auto_now_add=True,
+    verbose_name=_('Created At'),
+  )
+
+  class Meta:
+    ordering = ('-created_at', )
+
+  def __str__(self) -> str:
+    s = formats.date_format(
+      timezone.localtime(self.created_at),
+      settings.DATETIME_FORMAT,
+    )
+    return s
+
+  @property
+  def expires_at(self) -> dt.datetime:
+    return self.created_at + dt.timedelta(seconds=self.expires_in)
+
+  def decode(self) -> dict:
+    """Decode JWT Token, which also verifies that it hasn't expired."""
+
+    client = jwt.PyJWKClient(self.API_JWKS_URL)
+    signing_key = client.get_signing_key_from_jwt(self.access_token)
+    data = jwt.decode(
+      self.access_token,
+      signing_key.key,
+      algorithms=['RS256'],
+      audience=f'{CTCTModel.API_URL}{CTCTModel.API_VERSION}',
+    )
+    return data
+
+
 # TODO: update(), create()
-class RemoteManager(models.Manager):
+class RemoteManager(BaseRemoteManager):
   """Base class for utilizing the API."""
 
   API_URL = 'https://api.cc.email'
@@ -50,8 +291,11 @@ class RemoteManager(models.Manager):
     return super().get_queryset().none()
 
   def connect(self) -> None:
+    token = Token.remote.get()
     self.session = requests.Session()
-    self.session.headers.update(Token.get().authorization_header)
+    self.session.headers.update({
+      'Authorization': f"{token.token_type} {token.access_token}"
+    })
 
   def serialize(self, obj: Model) -> dict:
     """Convert from Django object to API request body."""
@@ -201,58 +445,13 @@ class RemoteManager(models.Manager):
 
     return data, related_objs
 
-  def get_url(
-    self,
-    method: HttpMethod,
-    api_id: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    endpoint_suffix: Optional[str] = None,
-  ) -> str:
-    endpoint = endpoint or self.model.API_ENDPOINT
-    if not endpoint.startswith(self.API_VERSION):
-      endpoint = f'{self.API_VERSION}{endpoint}'
-
-    url = f'{self.API_URL}{endpoint}'
-
-    if api_id:
-      url += f'/{api_id}'
-
-    if endpoint_suffix:
-      url += f'{endpoint_suffix}'
-
-    if (method == 'GET') and ('?' not in url) and self.model.API_GET_QUERIES:
-      url += '?'
-      for name, value in self.model.API_GET_QUERIES.items():
-        url += f'{name}={value}'
-
-    return url
-
-  def raise_or_json(self, response: Response) -> Optional[dict]:
-    if response.status_code == 204:
-      data = None
-    elif response.status_code == 404:
-      # Allow catching 404 separately from HTTPError
-      raise Http404
-    else:
-      data = response.json()
-
-    try:
-      response.raise_for_status()
-    except HTTPError:
-      if isinstance(data, list):
-        data = data[0]
-      message = f"[{response.status_code}] {data['error_message']}"
-      raise HTTPError(message, response=response)
-
-    return data
-
   @sleep_and_retry
   @limits(calls=API_LIMIT_CALLS, period=API_LIMIT_PERIOD)
   def check_api_limit(self) -> None:
     """Honor the API's rate limit."""
     pass
 
-  @task()
+  @task()  # (queue_name='ctct')
   def create(self, obj: Model) -> Model:
     """Creates an existing Django object on the remote server.
 
@@ -268,7 +467,7 @@ class RemoteManager(models.Manager):
 
     self.check_api_limit()
     response = self.session.post(
-      url=self.get_url(method='POST'),
+      url=self.get_url(),
       json=self.serialize(obj),
     )
     data = self.raise_or_json(response)
@@ -297,8 +496,10 @@ class RemoteManager(models.Manager):
 
     self.check_api_limit()
 
-    url = self.get_url(method='GET', api_id=api_id)
-    response = self.session.get(url)
+    response = self.session.get(
+      url=self.get_url(api_id),
+      params=self.model.API_GET_QUERIES,
+    )
 
     try:
       data = self.raise_or_json(response)
@@ -325,8 +526,10 @@ class RemoteManager(models.Manager):
     while paginated:
       self.check_api_limit()
 
-      url = self.get_url(method='GET', endpoint=endpoint)
-      response = self.session.get(url)
+      response = self.session.get(
+        url=self.get_url(endpoint=endpoint),
+        params=self.model.API_GET_QUERIES,
+      )
       data = self.raise_or_json(response)
 
       # Data contains two keys: '_links' and e.g. 'contacts',  'lists', etc
@@ -348,7 +551,7 @@ class RemoteManager(models.Manager):
 
     return objs, related_objs
 
-  @task()
+  @task()  # (queue_name='ctct')
   def update(self, obj: Model) -> Model:
     """Update exisiting Django object on the remote server.
 
@@ -366,7 +569,7 @@ class RemoteManager(models.Manager):
 
     self.check_api_limit()
     response = self.session.put(
-      url=self.get_url(method='PUT', api_id=obj.api_id),
+      url=self.get_url(obj.api_id),
       json=self.serialize(obj),
     )
     data = self.raise_or_json(response)
@@ -381,7 +584,7 @@ class RemoteManager(models.Manager):
 
     return obj
 
-  @task()
+  @task()  # (queue_name='ctct')
   def delete(self, obj: Model, endpoint_suffix: Optional[str] = None) -> None:
     """Delete existing Django object on the remote server.
 
@@ -397,11 +600,7 @@ class RemoteManager(models.Manager):
 
     self.check_api_limit()
 
-    url = self.get_url(
-      method='DELETE',
-      api_id=obj.api_id,
-      endpoint_suffix=endpoint_suffix,
-    )
+    url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
     response = self.session.delete(url)
 
     if response.status_code != 404:
@@ -423,8 +622,6 @@ class CTCTModel(Model):
   objects = models.Manager()
   remote = RemoteManager()
 
-  save_to_ctct: Optional[Literal['sync', 'async']] = 'async'
-
   api_id = models.UUIDField(
     null=True,     # Allow objects to be created without CTCT IDs
     default=None,  # Models often created without CTCT IDs
@@ -437,132 +634,8 @@ class CTCTModel(Model):
     abstract = True
 
   def save(self, *args, **kwargs) -> None:
-    self.save_to_ctct = kwargs.pop('save_to_ctct', self.save_to_ctct)
+    self.enqueue = kwargs.pop('enqueue', settings.CTCT_ENQUEUE_DEFAULT)
     super().save(*args, **kwargs)
-
-
-# DONE
-class CTCTLocalModel(CTCTModel):
-  """Local model without remote saving support.
-
-  Notes
-  -----
-  The crucial check that prevents CTCTLocalModels from being saved remotely is
-  the `isinstance(instance, CTCTLocalModel)` lines in signals.py.
-
-  """
-
-  class Meta(CTCTModel.Meta):
-    abstract = True
-
-
-# DONE
-class Token(Model):
-  """Authorization token for CTCT API access.
-
-  Notes
-  -----
-  To get the latest Token, use the `get()` class method.
-
-  """
-
-  API_AUTH_URL = 'https://authz.constantcontact.com/oauth2/default/v1/token'
-  API_JWKS_URL = (
-    'https://identity.constantcontact.com/'
-    'oauth2/aus1lm3ry9mF7x2Ja0h8/v1/keys'
-  )
-
-  access_code = models.TextField(
-    verbose_name=_('Access Code'),
-  )
-  refresh_code = models.CharField(
-    max_length=50,
-    verbose_name=_('Refresh Code'),
-  )
-  type = models.CharField(
-    max_length=50,
-    default='Bearer',
-    verbose_name=_('Type'),
-  )
-  inserted = models.DateTimeField(
-    auto_now=False,
-    auto_now_add=True,
-    verbose_name=_('Inserted'),
-  )
-
-  class Meta:
-    ordering = ('-inserted', )
-
-  def __str__(self) -> str:
-    s = formats.date_format(
-      timezone.localtime(self.inserted),
-      settings.DATETIME_FORMAT,
-    )
-    return s
-
-  def decode(self) -> dict:
-    """Decode JWT Token, which also verifies that it hasn't expired."""
-
-    client = jwt.PyJWKClient(self.API_JWKS_URL)
-    signing_key = client.get_signing_key_from_jwt(self.access_code)
-    data = jwt.decode(
-      self.access_code,
-      signing_key.key,
-      algorithms=['RS256'],
-      audience=f'{CTCTModel.API_URL}{CTCTModel.API_VERSION}',
-    )
-    return data
-
-  def refresh(self) -> Self:
-    """Obtain a new Token from CTCT using the refresh code."""
-
-    response = requests.post(
-      url=self.API_AUTH_URL,
-      auth=(settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY),
-      data={
-        'refresh_token': self.refresh_code,
-        'grant_type': 'refresh_token',
-      },
-    )
-    data = RemoteManager.raise_or_json(response)
-
-    # Create new Token for future use
-    if 'refresh_token' in data:
-      token = Token.objects.create(
-        access_code=data['access_token'],
-        refresh_code=data['refresh_token'],
-        type=data['token_type'],
-      )
-    else:
-      message = (
-        "Token does not contain `refresh_token`.\n"
-        f"{data}"
-      )
-      raise ValueError(message)
-    return token
-
-  @classmethod
-  def get(cls) -> Self:
-    """Fetches most recent token, refreshing if necessary."""
-
-    token = Token.objects.first()
-    if not token:
-      message = (
-        "No tokens in the database yet. "
-        f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
-      )
-      raise ValueError(message)
-
-    try:
-      token.decode()
-    except jwt.ExpiredSignatureError:
-      token = token.refresh()
-
-    return token
-
-  @property
-  def authorization_header(self) -> dict:
-    return {'Authorization': f"{self.type} {self.access_code}"}
 
 
 # DONE
@@ -571,23 +644,31 @@ class ContactListRemoteManager(RemoteManager):
 
   def add_list_memberships(
     self,
-    lists: QuerySet['ContactList'],
-    contacts: QuerySet['Contact']
+    contact_list: Optional['ContactList'] = None,
+    contact_lists: Optional[QuerySet['ContactList']] = None,
+    contacts: Optional[QuerySet['Contact']] = None,
   ) -> None:
     """Adds multiple Contacts to (multiple) ContactLists."""
 
     API_MAX_CONTACTS = 500
 
-    list_ids = list(map(str, lists.values_list('api_id', flat=True)))
-    contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
+    if contact_list is not None:
+      list_ids = [contact_list.api_id]
+    else:
+      list_ids = list(map(str, contact_lists.values_list('api_id', flat=True)))
+
+    if contacts is not None:
+      contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
+    else:
+      message = (
+        "Must pass a QuerySet of Contacts!"
+      )
+      raise ValueError(message)
 
     for i in range(0, len(contact_ids), API_MAX_CONTACTS):
       self.check_api_limit()
       response = self.session.post(
-        url=self.get_url(
-          method='POST',
-          endpoint='/activities/add_list_memberships',
-        ),
+        url=self.get_url(endpoint='/activities/add_list_memberships'),
         json={
           'source': {'contact_ids': contact_ids[i:i + API_MAX_CONTACTS]},
           'list_ids': list_ids,
@@ -747,7 +828,7 @@ class ContactRemoteManager(RemoteManager):
 
     self.check_api_limit()
     response = self.session.post(
-      url=self.get_url(method='POST', endpoint_suffix='/sign_up_form'),
+      url=self.get_url(endpoint_suffix='/sign_up_form'),
       json=data,
     )
     data = self.raise_or_json(response)
@@ -1065,7 +1146,7 @@ class ContactAndContactList(models.Model):
 
 
 # DONE
-class ContactNote(CTCTLocalModel):
+class ContactNote(models.Model):
   """Django implementation of a CTCT Note."""
 
   API_ID_LABEL = 'note_id'
@@ -1116,7 +1197,7 @@ class ContactNote(CTCTLocalModel):
 
 
 # DONE
-class ContactPhoneNumber(CTCTLocalModel):
+class ContactPhoneNumber(models.Model):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
   API_ID_LABEL = 'phone_number_id'
@@ -1184,7 +1265,7 @@ class ContactPhoneNumber(CTCTLocalModel):
 
 
 # DONE
-class ContactStreetAddress(CTCTLocalModel):
+class ContactStreetAddress(models.Model):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
   API_ID_LABEL = 'street_address_id'
@@ -1295,7 +1376,7 @@ class ContactStreetAddress(CTCTLocalModel):
 
 
 # DONE
-class ContactCustomField(CTCTLocalModel):
+class ContactCustomField(models.Model):
   """Django implementation of a CTCT Contact's CustomField.
 
   Notes
@@ -1387,7 +1468,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     # Create EmailCampaign (and CampaignActivities) on CTCT servers
     self.check_api_limit()
     response = self.session.post(
-      url=self.get_url(method='POST'),
+      url=self.get_url(),
       json={
         'name': obj.name,
         'email_campaign_activities': [
@@ -1406,7 +1487,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     for campaign_activity in data['campaign_activities']:
       if campaign_activity['role'] == 'primary_email':
         activity.api_id = campaign_activity['campaign_activity_id']
-        activity.save(save_to_ctct=False)
+        activity.save(enqueue=False)
         break
 
     # Schedule and send preview
@@ -1435,7 +1516,7 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     self.check_api_limit()
     response = self.session.patch(
-      url=self.get_url(method='PATCH', api_id=obj.api_id),
+      url=self.get_url(obj.api_id),
       json={'name': obj.name},
     )
     data = self.raise_or_json(response)
@@ -1448,7 +1529,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     return obj
 
 
-# TODO EmailCampaign.current_status vs CampaignActivity.current_status
+# TODO: EmailCampaign.current_status vs CampaignActivity.current_status
 class EmailCampaign(CTCTModel):
   """Django implementation of a CTCT EmailCampaign."""
 
@@ -1683,11 +1764,7 @@ class CampaignActivityRemoteManager(RemoteManager):
 
     self.check_api_limit()
     response = self.session.post(
-      url=self.get_url(
-        method='POST',
-        api_id=obj.api_id,
-        endpoint_suffix='/tests',
-      ),
+      url=self.get_url(obj.api_id, endpoint_suffix='/tests'),
       json={
         'email_addresses': recipients,
         'personal_message': message,
@@ -1723,11 +1800,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     # Finally, schedule the CampaignActivity
     self.check_api_limit()
     response = self.session.post(
-      url=self.get_url(
-        method='POST',
-        api_id=obj.api_id,
-        endpoint_suffix='/schedules',
-      ),
+      url=self.get_url(obj.api_id, endpoint_suffix='/schedules'),
       json={'scheduled_date': obj.scheduled_datetime.isoformat()},
     )
     self.raise_or_json(response)
