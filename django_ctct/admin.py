@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.db.models import Field as ModelField
 from django.db.models.query import QuerySet
@@ -18,6 +19,27 @@ from django_ctct.models import (
   Contact, CustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity
 )
+
+
+# TODO:
+# def ctct_update_lists_task(contact: 'Contact') -> None:
+#   """Update ContactLists on CTCT, or delete Contact if no ContactLists.
+#
+#   Notes
+#   -----
+#   Due to the way Django admin saves related models, I haven't been able
+#   to determine a good way to address this other than just delaying this
+#   method for a few minutes.
+#
+#   The primary issue is that we want to make sure that a Contact.ctct_save()
+#   call isn't made after this call, since that will revive the Contact in
+#   the event that they had been deleted from CTCT servers due to no longer
+#   belonging to any ContactLists (CTCT requires that Contacts must belong to
+#   at least one ContactList).
+#   """
+#   if contact.api_id is not None:
+#     sleep(60 * 1)  # 1 minute
+#     contact.ctct_update_lists()
 
 
 class ViewModelAdmin(admin.ModelAdmin):
@@ -48,35 +70,34 @@ class ViewModelAdmin(admin.ModelAdmin):
     return False
 
 
-@admin.register(Token)
 class TokenAdmin(ViewModelAdmin):
   """Admin functionality for CTCT Tokens."""
 
   # ListView
   list_display = (
-    'inserted',
-    'copy_access_code',
-    'copy_refresh_code',
-    'type',
+    'created_at',
+    'expires_at',
+    'copy_access_token',
+    'copy_refresh_token',
   )
 
-  def copy_access_code(self, obj: Token) -> str:
+  def copy_access_token(self, obj: Token) -> str:
     html = format_html(
       '<button class="button" onclick="{function}">{copy_icon}</button>',
-      function=f"navigator.clipboard.writeText('{obj.access_code}')",
+      function=f"navigator.clipboard.writeText('{obj.access_token}')",
       copy_icon=mark_safe('&#128203;'),
     )
     return html
-  copy_access_code.short_description = _('Access Code')
+  copy_access_token.short_description = _('Access Token')
 
-  def copy_refresh_code(self, obj: Token) -> str:
+  def copy_refresh_token(self, obj: Token) -> str:
     html = format_html(
       '<button class="button" onclick="{function}">{copy_icon}</button>',
-      function=f"navigator.clipboard.writeText('{obj.refresh_code}')",
+      function=f"navigator.clipboard.writeText('{obj.refresh_token}')",
       copy_icon=mark_safe('&#128203;'),
     )
     return html
-  copy_refresh_code.short_description = _('Refresh Code')
+  copy_refresh_token.short_description = _('Refresh Token')
 
   # ChangeView
   def changeform_view(
@@ -106,7 +127,6 @@ class ContactListForm(forms.ModelForm):
     fields = '__all__'
 
 
-@admin.register(ContactList)
 class ContactListAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT ContactLists."""
 
@@ -146,7 +166,6 @@ class ContactListAdmin(admin.ModelAdmin):
   )
 
 
-@admin.register(CustomField)
 class CustomFieldAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT CustomFields."""
 
@@ -234,7 +253,6 @@ class ContactNoteInline(admin.TabularInline):
     return False
 
 
-@admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT Contacts."""
 
@@ -340,7 +358,6 @@ class ContactAdmin(admin.ModelAdmin):
       return super().save_formset(request, form, formset, change)
 
 
-@admin.register(ContactNote)
 class ContactNoteAdmin(ViewModelAdmin):
   """Admin functionality for ContactNotes."""
 
@@ -449,7 +466,6 @@ class CampaignActivityInline(admin.StackedInline):
   #  return formfield
 
 
-@admin.register(EmailCampaign)
 class EmailCampaignAdmin(admin.ModelAdmin):
   """Admin functionality for CTCT EmailCampaigns."""
 
@@ -533,3 +549,12 @@ class EmailCampaignAdmin(admin.ModelAdmin):
       ),
     }[obj.action]
     self.message_user(request, message)
+
+
+if getattr(settings, 'CTCT_USE_ADMIN', False):
+  admin.site.register(Token, TokenAdmin)
+  admin.site.register(ContactList, ContactListAdmin)
+  admin.site.register(CustomField, CustomFieldAdmin)
+  admin.site.register(Contact, ContactAdmin)
+  admin.site.register(ContactNote, ContactNoteAdmin)
+  admin.site.register(EmailCampaign, EmailCampaignAdmin)
