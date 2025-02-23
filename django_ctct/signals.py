@@ -17,7 +17,7 @@ def remote_save(
 ) -> None:
   """Create or update the instance on CTCT servers."""
 
-  if isinstance(instance, CTCTModel) and instance.save_to_ctct:
+  if isinstance(instance, CTCTModel):
     sender.remote.connect()
     if instance.api_id:
       task = sender.remote.update
@@ -33,7 +33,7 @@ def remote_save(
 def remote_delete(sender, instance, **kwargs) -> None:
   """Delete the instance from CTCT servers."""
 
-  if isinstance(instance, CTCTModel) and instance.save_to_ctct:
+  if isinstance(instance, CTCTModel):
     sender.remote.connect()
     task = sender.remote.delete
 
