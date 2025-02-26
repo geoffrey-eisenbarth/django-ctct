@@ -3,13 +3,10 @@ from typing import List, Tuple, Optional
 from django import forms
 from django.conf import settings
 from django.contrib import admin
-from django.db.models import Field as ModelField
 from django.db.models.query import QuerySet
 from django.forms import ModelForm
-from django.forms import Field as FormField
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
-from django.template.response import TemplateResponse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -19,41 +16,21 @@ from django_ctct.models import (
   Contact, CustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity
 )
-
-
-# TODO:
-# def ctct_update_lists_task(contact: 'Contact') -> None:
-#   """Update ContactLists on CTCT, or delete Contact if no ContactLists.
-#
-#   Notes
-#   -----
-#   Due to the way Django admin saves related models, I haven't been able
-#   to determine a good way to address this other than just delaying this
-#   method for a few minutes.
-#
-#   The primary issue is that we want to make sure that a Contact.ctct_save()
-#   call isn't made after this call, since that will revive the Contact in
-#   the event that they had been deleted from CTCT servers due to no longer
-#   belonging to any ContactLists (CTCT requires that Contacts must belong to
-#   at least one ContactList).
-#   """
-#   if contact.api_id is not None:
-#     sleep(60 * 1)  # 1 minute
-#     contact.ctct_update_lists()
+from django_ctct.signals import remote_save, remote_delete
 
 
 class ViewModelAdmin(admin.ModelAdmin):
   """Remove CRUD permissions."""
 
-  def has_add_permission(self, request, obj=None):
+  def has_add_permission(self, request: HttpRequest, obj=None):
     """Prevent creation in the Django admin."""
     return False
 
-  def has_change_permission(self, request, obj=None):
+  def has_change_permission(self, request: HttpRequest, obj=None):
     """Prevent updates in the Django admin."""
     return False
 
-  def get_readonly_fields(self, request, obj=None):
+  def get_readonly_fields(self, request: HttpRequest, obj=None):
     """Prevent updates in the Django admin."""
     if obj is not None:
       readonly_fields = (
@@ -65,7 +42,7 @@ class ViewModelAdmin(admin.ModelAdmin):
       readonly_fields = tuple()
     return readonly_fields
 
-  def has_delete_permission(self, request, obj=None):
+  def has_delete_permission(self, request: HttpRequest, obj=None):
     """Prevent deletion in the Django admin."""
     return False
 
@@ -74,7 +51,9 @@ class TokenAdmin(ViewModelAdmin):
   """Admin functionality for CTCT Tokens."""
 
   # ListView
+  list_display_links = None
   list_display = (
+    'scope',
     'created_at',
     'expires_at',
     'copy_access_token',
@@ -99,21 +78,39 @@ class TokenAdmin(ViewModelAdmin):
     return html
   copy_refresh_token.short_description = _('Refresh Token')
 
-  # ChangeView
-  def changeform_view(
-    self,
-    request: HttpRequest,
-    object_id: Optional[int] = None,
-    form_url: str = '',
-    extra_context: Optional[dict] = None
-  ) -> TemplateResponse:
-    """Remove extra buttons."""
-    extra_context = extra_context or {}
-    extra_context.update({
-      'show_save_and_continue': False,
-      'show_save_and_add_another': False,
-    })
-    return super().changeform_view(request, object_id, form_url, extra_context)
+
+class RemoteModelAdmin(admin.ModelAdmin):
+  """Facilitate remote saving and deleting."""
+
+  @property
+  def remote_sync(self) -> bool:
+    sync_admin = getattr(settings, 'CTCT_SYNC_ADMIN', False)
+    sync_signals = getattr(settings, 'CTCT_SYNC_SIGNALS', False)
+    return sync_admin and not sync_signals
+
+  def save_model(self, request: HttpRequest, obj, form, change):
+    super().save_model(request, obj, form, change)
+    if self.remote_sync:
+      remote_save(sender=self.model, instance=obj, created=not change)
+
+  def delete_model(self, request: HttpRequest, obj):
+    super().delete_model(request, obj)
+    if self.remote_sync:
+      remote_delete(sender=self.model, instance=obj)
+
+  def delete_queryset(self, request: HttpRequest, queryset):
+    if self.remote_sync:
+      message = _("CTCT bulk activities not implemented yet.")
+      raise NotImplementedError(message)
+    else:
+      super().delete_queryset(request, queryset)
+
+  # TODO: How to get `sender` and `action`?
+  def save_related(self, request: HttpRequest, obj, form, change):
+    super().save_related(request, obj, form, change)
+    if self.remote_sync:
+      pass
+      # remote_update_m2m(sender=sender, instace=obj, action=action)
 
 
 class ContactListForm(forms.ModelForm):
@@ -127,7 +124,7 @@ class ContactListForm(forms.ModelForm):
     fields = '__all__'
 
 
-class ContactListAdmin(admin.ModelAdmin):
+class ContactListAdmin(RemoteModelAdmin):
   """Admin functionality for CTCT ContactLists."""
 
   # ListView
@@ -138,13 +135,8 @@ class ContactListAdmin(admin.ModelAdmin):
     'created_at',
     'updated_at',
     'favorite',
-    'synced',
+    'exists_remotely',
   )
-
-  def synced(self, obj: ContactList) -> bool:
-    return bool(obj.api_id)
-  synced.boolean = True
-  synced.short_description = _('Synced')
 
   def membership(self, obj: ContactList) -> int:
     return obj.members.all().count()
@@ -166,7 +158,7 @@ class ContactListAdmin(admin.ModelAdmin):
   )
 
 
-class CustomFieldAdmin(admin.ModelAdmin):
+class CustomFieldAdmin(RemoteModelAdmin):
   """Admin functionality for CTCT CustomFields."""
 
   # ListView
@@ -205,16 +197,16 @@ class ContactStatusFilter(admin.SimpleListFilter):
     queryset: QuerySet,
   ) -> QuerySet[Contact]:
     if self.value() == 'synced':
-      queryset = queryset.filter(api_id__isnull=False)
+      queryset = queryset.filter(exists_remotely=True)
     elif self.value() == 'not_synced':
-      queryset = queryset.filter(api_id__isnull=True)
+      queryset = queryset.filter(exists_remotely=False)
     elif self.value() == 'opted_out':
       queryset = queryset.exclude(opt_out_source='')
 
     return queryset
 
 
-class ContactStreetAddressInline(admin.TabularInline):
+class ContactStreetAddressInline(admin.StackedInline):
   """Inline for adding ContactStreetAddresses to a Contact."""
 
   model = ContactStreetAddress
@@ -240,7 +232,7 @@ class ContactNoteInline(admin.TabularInline):
   model = ContactNote
   exclude = ('api_id', )
 
-  extra = 0
+  extra = 1
   max_num = Contact.API_MAX_NOTES
 
   readonly_fields = ('author', 'created_at')
@@ -253,7 +245,7 @@ class ContactNoteInline(admin.TabularInline):
     return False
 
 
-class ContactAdmin(admin.ModelAdmin):
+class ContactAdmin(RemoteModelAdmin):
   """Admin functionality for CTCT Contacts."""
 
   # ListView
@@ -274,12 +266,12 @@ class ContactAdmin(admin.ModelAdmin):
   )
   list_filter = (
     ContactStatusFilter,
-    'list_memberships',  # TODO: this doesn't work?
+    'list_memberships',
   )
   empty_value_display = '(None)'
 
   def status(self, obj: Contact) -> str:
-    if not obj.api_id:
+    if not obj.exists_remotely:
       text, color = 'Not Synced', 'bad'
     elif obj.opted_out:
       text, color = 'Opted Out', 'warn'
@@ -309,7 +301,7 @@ class ContactAdmin(admin.ModelAdmin):
     }),
     ('CONTACT LISTS', {
       'fields': (
-        # 'list_memberships',  # TODO: This breaks if using Custom ThroughModel?
+        'list_memberships',
         ('opt_out_source', 'opt_out_date', 'opt_out_reason'),
       ),
     }),
@@ -320,11 +312,10 @@ class ContactAdmin(admin.ModelAdmin):
       ),
     }),
   )
-  # TODO: This breaks if using Custom ThroughModel?
-  #filter_horizontal = ('list_memberships', )
+  filter_horizontal = ('list_memberships', )
   inlines = (
-    ContactStreetAddressInline,
     ContactPhoneNumberInline,
+    ContactStreetAddressInline,
     ContactNoteInline,
   )
 
@@ -334,7 +325,7 @@ class ContactAdmin(admin.ModelAdmin):
     obj: Optional[Contact] = None,
   ) -> List[str]:
     readonly_fields = Contact.API_READONLY_FIELDS
-    if obj.opted_out and not request.user.is_superuser:
+    if obj and obj.opted_out and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
 
@@ -384,34 +375,28 @@ class ContactNoteAdmin(ViewModelAdmin):
     'author',
   )
 
-  def has_delete_permission(self, request, obj=None):
+  def has_delete_permission(self, request: HttpRequest, obj=None):
     """Allow superusers to delete Notes."""
     return request.user.is_superuser
 
 
+# TODO: If action == 'SCEHDULE', validate EmailCampaign has scheduled_datetime
 class CampaignActivityInlineForm(forms.ModelForm):
   """Custom widget choices for ContactList admin."""
 
   ACTIONS = (
     ('NONE', 'Select Action'),
-    ('CREATE', 'Create Draft'),
     ('SCHEDULE', 'Schedule'),
     ('UNSCHEDULE', 'Unschedule'),
   )
-  # TODO: Is this needed?
-  ACTIONS_FROM_STATUS = {
-    'NONE': ACTIONS[:3],
-    'DRAFT': ACTIONS[:1] + ACTIONS[2:4],
-    'SCHEDULED': ACTIONS[:1] + ACTIONS[3:4],
-    'UNSCHEDULED': ACTIONS[:1] + ACTIONS[2:3],
-    'EXECUTING': ACTIONS[:1],
-    'DONE': ACTIONS[:1],
-    'ERROR': ACTIONS[:1],
-    'REMOVED': ACTIONS[:1],
-  }
 
+  html_content = forms.CharField(
+    widget=forms.Textarea,
+    label=_('HTML Content'),
+  )
   action = forms.ChoiceField(
     choices=ACTIONS,
+    label=_('Action'),
   )
 
   class Meta:
@@ -432,41 +417,29 @@ class CampaignActivityInlineForm(forms.ModelForm):
 #    self.action = 'NONE'
 
 
-
 class CampaignActivityInline(admin.StackedInline):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
   form = CampaignActivityInlineForm
-  exclude = ('api_id', )
+  fields = (
+    'role', 'current_status', 'format_type',
+    'from_name', 'from_email', 'reply_to_email',
+    'subject', 'preheader', 'html_content',
+    'action',
+  )
 
   extra = 1
   max_num = 1
 
-  class Meta:
-    widgets = {
-      'html_content': forms.Textarea,  # TODO: Allow user to set RichTextEditor?
-    }
-
-  def get_readonly_fields(self, request, obj=None):
+  def get_readonly_fields(self, request: HttpRequest, obj=None):
     readonly_fields = CampaignActivity.API_READONLY_FIELDS
     if obj and obj.current_status == 'DONE':
       readonly_fields += CampaignActivity.API_EDITABLE_FIELDS
     return readonly_fields
 
-  # TODO?
-  #def formfield_for_dbfield(
-  #  self,
-  #  db_field: ModelField,
-  #  request: HttpRequest,
-  #) -> FormField:
-  #  formfield = {
-  #    'html_content': forms.Textarea,
-  #  }.get(db_field.name, super().formfield_for_dbfield(db_field, request))
-  #  return formfield
 
-
-class EmailCampaignAdmin(admin.ModelAdmin):
+class EmailCampaignAdmin(RemoteModelAdmin):
   """Admin functionality for CTCT EmailCampaigns."""
 
   # ListView
@@ -497,7 +470,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
   # ChangeView
   inlines = (CampaignActivityInline, )
 
-  def get_fieldsets(self, request, obj=None):
+  def get_fieldsets(self, request: HttpRequest, obj=None):
     if obj and (obj.current_status == 'DONE'):
       fieldsets = (
         (None, {
@@ -519,7 +492,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
 
     return fieldsets
 
-  def get_readonly_fields(self, request, obj=None):
+  def get_readonly_fields(self, request: HttpRequest, obj=None):
     readonly_fields = EmailCampaign.API_READONLY_FIELDS
     if obj and obj.current_status == 'DONE':
       readonly_fields += ('scheduled_datetime', )

@@ -12,14 +12,14 @@ def remote_save(
   sender: Type[Model],
   instance: Model,
   created: bool,
-  update_fields: Optional[list],
+  update_fields: Optional[list] = None,
   **kwargs,
 ) -> None:
   """Create or update the instance on CTCT servers."""
 
   if isinstance(instance, CTCTModel):
     sender.remote.connect()
-    if instance.api_id:
+    if instance.exists_remotely:
       task = sender.remote.update
     else:
       task = sender.remote.create

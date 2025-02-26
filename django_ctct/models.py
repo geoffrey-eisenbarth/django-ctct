@@ -1,6 +1,7 @@
 import datetime as dt
 import re
 from typing import Literal, Optional
+import uuid
 
 import jwt
 
@@ -110,12 +111,26 @@ class CTCTModel(Model):
   remote = RemoteManager()
 
   api_id = models.UUIDField(
+    #default=uuid.uuid4,
+    #unique=True,
     null=True,     # Allow objects to be created without CTCT IDs
     default=None,  # Models often created without CTCT IDs
     unique=True,   # Note: None != None for uniqueness check
-    blank=True,
     verbose_name=_('API ID'),
   )
+  exists_remotely = models.BooleanField(
+    default=False,
+    verbose_name=_('Exists Remotely'),
+  )
+
+  class Meta:
+    abstract = True
+
+
+class CTCTLocalModel(Model):
+  """Used to serialzie models that don't have API ids."""
+  objects = models.Manager()
+  remote = RemoteManager()
 
   class Meta:
     abstract = True
@@ -265,6 +280,7 @@ class Contact(CTCTModel):
   API_ENDPOINT = '/contacts'
   API_ID_LABEL = 'contact_id'
   API_EDITABLE_FIELDS = (
+    'first_name',
     'last_name',
     'job_title',
     'company_name',
@@ -373,7 +389,7 @@ class Contact(CTCTModel):
 
   list_memberships = models.ManyToManyField(
     ContactList,
-    through='ContactAndContactList',
+    #through='ContactAndContactList',
     related_name='members',
     verbose_name=_('List Memberships'),
     blank=True,
@@ -452,7 +468,7 @@ class Contact(CTCTModel):
 
   @property
   def ctct_source(self) -> dict:
-    if self.api_id:
+    if self.exists_remotely:
       source = {'update_source': self.update_source}
     else:
       source = {'create_source': self.create_source}
@@ -502,7 +518,7 @@ class Contact(CTCTModel):
     return data
 
 
-class ContactAndContactList(models.Model):
+class ContactAndContactList(Model):
   """Custom through model that uses CTCT API ids.
 
   Notes
@@ -529,8 +545,14 @@ class ContactAndContactList(models.Model):
     to_field='api_id',
   )
 
+  class Meta:
+    # https://code.djangoproject.com/ticket/12203#comment:22
+    # See GH: https://github.com/django/django/pull/18612
+    pass
+    #auto_created = True
 
-class ContactNote(models.Model):
+
+class ContactNote(CTCTLocalModel):
   """Django implementation of a CTCT Note."""
 
   API_ID_LABEL = 'note_id'
@@ -547,7 +569,7 @@ class ContactNote(models.Model):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='notes',
     verbose_name=_('Contact'),
   )
@@ -583,7 +605,7 @@ class ContactNote(models.Model):
     # ]
 
 
-class ContactPhoneNumber(models.Model):
+class ContactPhoneNumber(CTCTLocalModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
   API_ID_LABEL = 'phone_number_id'
@@ -603,7 +625,7 @@ class ContactPhoneNumber(models.Model):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='phone_numbers',
     verbose_name=_('Contact'),
   )
@@ -650,7 +672,7 @@ class ContactPhoneNumber(models.Model):
     return phone_number
 
 
-class ContactStreetAddress(models.Model):
+class ContactStreetAddress(CTCTLocalModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
   API_ID_LABEL = 'street_address_id'
@@ -680,7 +702,7 @@ class ContactStreetAddress(models.Model):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='street_addresses',
     verbose_name=_('Contact'),
   )
@@ -767,7 +789,7 @@ class ContactStreetAddress(models.Model):
     return cls.clean_remote_string(data.get('country', ''))
 
 
-class ContactCustomField(models.Model):
+class ContactCustomField(CTCTLocalModel):
   """Django implementation of a CTCT Contact's CustomField.
 
   Notes
@@ -791,7 +813,7 @@ class ContactCustomField(models.Model):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='custom_fields',
     verbose_name=_('Contact'),
   )
@@ -800,7 +822,7 @@ class ContactCustomField(models.Model):
   custom_field = models.ForeignKey(
     CustomField,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='instances',
     verbose_name=_('Field'),
   )
@@ -891,7 +913,7 @@ class EmailCampaign(CTCTModel):
   current_status = models.CharField(
     choices=STATUSES,
     max_length=20,
-    default='NONE',
+    default='DRAFT',
     verbose_name=_('Current Status'),
   )
   created_at = models.DateTimeField(
@@ -1082,7 +1104,7 @@ class CampaignActivity(CTCTModel):
   campaign = models.ForeignKey(
     EmailCampaign,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
     related_name='campaign_activities',
     verbose_name=_('Campaign'),
   )
@@ -1126,7 +1148,7 @@ class CampaignActivity(CTCTModel):
   )
   contact_lists = models.ManyToManyField(
     ContactList,
-    through='CampaignActivityAndContactList',
+    #through='CampaignActivityAndContactList',
     related_name='campaign_activities',
     verbose_name=_('Contact Lists'),
   )
@@ -1141,7 +1163,7 @@ class CampaignActivity(CTCTModel):
   current_status = models.CharField(
     choices=EmailCampaign.STATUSES,
     max_length=20,
-    default='NONE',
+    default='DRAFT',
     verbose_name=_('Current Status'),
   )
   format_type = models.IntegerField(
@@ -1182,7 +1204,9 @@ class CampaignActivity(CTCTModel):
     return s
 
   def serialize(self, data: dict) -> dict:
-    if self.api_id and (contact_lists := data.pop('contact_lists', None)):
+    # TODO Do we serialize contact_lists when first creating the EmailCampaign+CA payload?
+    # if self.exists_remotely and (contact_lists := data.pop('contact_lists', None)):
+    if contact_lists := data.pop('contact_lists', None):
       data['contact_list_ids'] = contact_lists
     return data
 
@@ -1234,7 +1258,7 @@ class CampaignActivity(CTCTModel):
     return data.pop('contact_list_ids', [])
 
 
-class CampaignActivityAndContactList(models.Model):
+class CampaignActivityAndContactList(Model):
   """Custom through model that uses CTCT API ids.
 
   Notes

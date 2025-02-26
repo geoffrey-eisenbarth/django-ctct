@@ -149,7 +149,7 @@ class TokenRemoteManager(BaseRemoteManager):
       },
     )
     data = self.raise_or_json(response)
-    token = Token.objects.create(**data)
+    token = self.model.objects.create(**data)
     return token
 
   def get(self) -> Token:
@@ -181,7 +181,7 @@ class TokenRemoteManager(BaseRemoteManager):
       },
     )
     data = self.raise_or_json(response)
-    token = Token.objects.create(**data)
+    token = self.model.objects.create(**data)
     return token
 
 
@@ -200,6 +200,8 @@ class RemoteManager(BaseRemoteManager):
     return super().get_queryset().none()
 
   def connect(self) -> None:
+    from django_ctct.models import Token
+
     token = Token.remote.get()
     self.session = requests.Session()
     self.session.headers.update({
@@ -230,8 +232,8 @@ class RemoteManager(BaseRemoteManager):
         value = getattr(obj, field_name)
       elif field.many_to_many:
         if obj.pk:
-          # TODO API: What if not str/UUID
-          value = [str(_.api_id) for _ in getattr(obj, field_name).all()]
+          # TODO API: What if not str/UUID? Is exists_remotely needed? or is all() ok?
+          value = [str(_.api_id) for _ in getattr(obj, field_name).filter(exists_remotely=True)]
         else:
           value = []
       elif field.one_to_many:
@@ -367,7 +369,7 @@ class RemoteManager(BaseRemoteManager):
     """Honor the API's rate limit."""
     pass
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def create(self, obj: Model) -> Model:
     """Creates an existing Django object on the remote server.
 
@@ -391,6 +393,7 @@ class RemoteManager(BaseRemoteManager):
     obj, related_objs = self.deserialize(data)
 
     obj.pk = pk
+    obj.exists_remotely = True
     obj.save()
 
     # TODO: Delete if RelatedModel is ManyToMany?
@@ -466,7 +469,7 @@ class RemoteManager(BaseRemoteManager):
 
     return objs, related_objs
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def update(self, obj: Model) -> Model:
     """Update exisiting Django object on the remote server.
 
@@ -479,7 +482,7 @@ class RemoteManager(BaseRemoteManager):
 
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
-    elif not obj.api_id:
+    elif not obj.exists_remotely:
       raise ValueError('Must create object remotely first.')
 
     self.check_api_limit()
@@ -492,15 +495,19 @@ class RemoteManager(BaseRemoteManager):
     obj, related_objs = self.deserialize(data)
 
     obj.pk = pk
+    obj.exists_remotely = True
     obj.save()
 
     # TODO: only do this for ManyToMany?
     for RelatedModel, objs in related_objs.items():
-      RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
+      try:
+        RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
+      except:
+        breakpoint()
 
     return obj
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def delete(self, obj: Model, endpoint_suffix: Optional[str] = None) -> None:
     """Delete existing Django object on the remote server.
 
@@ -529,7 +536,7 @@ class RemoteManager(BaseRemoteManager):
 class ContactListRemoteManager(RemoteManager):
   """Extend RemoteManager to handle adding multiple Contacts."""
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def add_list_memberships(
     self,
     contact_list: Optional[ContactList] = None,
@@ -569,7 +576,7 @@ class ContactRemoteManager(RemoteManager):
   """Extend RemoteManager to handle ContactLists."""
 
   # TODO: Get error 400 if no list_memberships
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def update_or_create(self, obj: Contact) -> Contact:
     """Updates or creates the Contact based on `email`.
 
@@ -611,7 +618,7 @@ class ContactRemoteManager(RemoteManager):
     for RelatedModel, objs in related_objs.items():
       RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def update(self, obj: Contact) -> Optional[Contact]:
     """Update Contact and ContactList membership on CTCT servers.
 
@@ -628,7 +635,7 @@ class ContactRemoteManager(RemoteManager):
     in ConstantContact's database and can be revived at any time.
 
     """
-
+    return super().update(obj)
     if obj.list_memberships.exists():
       response = super().update(obj)
     else:
@@ -640,13 +647,13 @@ class EmailCampaignRemoteManager(RemoteManager):
   """Extend RemoteManager to handle creating EmailCampaigns."""
 
   def serialize(self, obj: Model) -> dict:
-    if obj.api_id:
+    if obj.exists_remotely:
       # The only field that the API will update
       return {'name': obj.name}
     else:
       return super().serialize(obj)
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def create(self, obj: EmailCampaign) -> EmailCampaign:
     """Creates a local EmailCampaign on the remote servers.
 
@@ -689,15 +696,17 @@ class EmailCampaignRemoteManager(RemoteManager):
     for related_obj in related_objs[CampaignActivity]:
       if related_obj.role == 'primary_email':
         activity.api_id = related_obj.api_id
-        activity.save(update_fields=['api_id'])
+        activity.exists_remotely = True
+        activity.save(update_fields=['api_id', 'exists_remotely'])
         break
 
     obj.pk = pk
+    obj.exists_remotely = True
     obj.save()
 
     return obj
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def update(self, obj: EmailCampaign) -> EmailCampaign:
     """Update EmailCampaign on remote servers.
 
@@ -708,7 +717,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     """
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
-    elif not obj.api_id:
+    elif not obj.exists_remotely:
       raise ValueError('Must create object remotely first.')
 
     self.check_api_limit()
@@ -721,6 +730,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     obj, _ = self.deserialize(data)
 
     obj.pk = pk
+    obj.exists_remotely = True
     obj.save()
 
     return obj
@@ -729,7 +739,7 @@ class EmailCampaignRemoteManager(RemoteManager):
 class CampaignActivityRemoteManager(RemoteManager):
   """Extend RemoteManager to handle scheduling."""
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def create(self, obj: CampaignActivity) -> NoReturn:
     message = (
       "ConstantContact API does not support creating CampaignActivities. "
@@ -737,7 +747,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     raise NotImplementedError(message)
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def update(self, obj: Model, send_preview: bool = False) -> Model:
     """Update CampaignActivity on CTCT servers.
 
@@ -770,7 +780,7 @@ class CampaignActivityRemoteManager(RemoteManager):
 
     return obj
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def send_preview(
     self,
     obj: CampaignActivity,
@@ -796,7 +806,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     self.raise_or_json(response)
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def schedule(self, obj: CampaignActivity, update_first: bool = True) -> None:
     """Schedules the `primary_email` CampaignActivity.
 
@@ -830,7 +840,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     self.raise_or_json(response)
 
-  @task(queue_name='ctct')
+  #@task(queue_name='ctct')
   def unschedule(self, obj: CampaignActivity) -> None:
     """Unschedules the `primary_email` CampaignActivity."""
     if obj.role == 'primary_email':

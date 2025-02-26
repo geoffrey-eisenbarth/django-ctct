@@ -17,10 +17,6 @@ class CTCTConfig(AppConfig):
   ]
 
   def ready(self):
-    from django_ctct.signals import (
-      remote_save, remote_delete, remote_update_m2m
-    )
-
     # Validate that necessary settings have been defined
     for value in self.ctct_settings:
       if not hasattr(settings, value):
@@ -30,7 +26,10 @@ class CTCTConfig(AppConfig):
         raise ImproperlyConfigured(message)
 
     # Hook up the signals
-    if getattr(settings, 'CTCT_USE_SIGNALS', False):
+    from django_ctct.signals import (
+      remote_save, remote_delete, remote_update_m2m
+    )
+    if getattr(settings, 'CTCT_SYNC_SIGNALS', False):
       post_save.connect(remote_save)
       pre_delete.connect(remote_delete)
       m2m_changed.connect(remote_update_m2m)
