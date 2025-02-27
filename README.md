@@ -106,7 +106,12 @@ Explain how to install dev dependencies and run the tests for your app.
 ## Contributing
 
 Explain how others can contribute to your app.
+ 
+To run tests:
 
+* `cd tests/project`
+* `poetry run coverage run ./manage.py test`
+* `poetry run coverage report`
 
 ## License
 

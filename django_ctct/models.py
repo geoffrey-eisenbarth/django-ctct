@@ -558,8 +558,8 @@ class ContactNote(CTCTLocalModel):
   API_ID_LABEL = 'note_id'
   API_EDITABLE_FIELDS = (
     'note_id',
-    'created_at',
     'content',
+    'created_at',  # Editable field, but set by Django db with auto_now
   )
   API_READONLY_FIELDS = tuple()
   API_MAX_LENGTH = {
@@ -580,7 +580,7 @@ class ContactNote(CTCTLocalModel):
     verbose_name=_('Author'),
   )
 
-  # API read-only fields
+  # API editable fields
   created_at = models.DateTimeField(
     auto_now=True,
     verbose_name=_('Created at'),
