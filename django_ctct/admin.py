@@ -295,10 +295,8 @@ class ContactAdmin(RemoteModelAdmin):
     (None, {
       'fields': (
         'email',
-        'honorific',
         'first_name',
         'last_name',
-        'suffix',
         'job_title',
         'company_name',
       ),

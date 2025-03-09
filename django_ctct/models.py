@@ -257,10 +257,6 @@ class Contact(CTCTModel):
     3) 'create_source'
     4) 'update_source'
 
-  The following editable fields are specified as `custom_fields`:
-    1) 'honorific'
-    2) 'suffix'
-
   """
 
   # Must explicitly specify both
@@ -315,19 +311,6 @@ class Contact(CTCTModel):
     blank=True,
     verbose_name=_('Company Name'),
     help_text=_('The name of the company where the contact works'),
-  )
-  honorific = models.CharField(
-    choices=SALUTATIONS,
-    max_length=5,
-    blank=True,
-    verbose_name=_('Honorific'),
-    help_text=_('The honorific of the contact'),
-  )
-  suffix = models.CharField(
-    max_length=10,
-    blank=True,
-    verbose_name=_('Suffix'),
-    help_text=_('The suffix of the contact'),
   )
 
   list_memberships = models.ManyToManyField(
