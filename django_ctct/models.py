@@ -396,20 +396,6 @@ class Contact(CTCTModel):
   )
 
   @property
-  def name(self) -> str:
-    field_names = ['honorific', 'first_name', 'last_name', 'suffix']
-    name = ' '.join(getattr(self, _) for _ in field_names).strip()
-    return name
-
-  @property
-  def job(self) -> str:
-    return ' @ '.join(filter(None, [self.job_title, self.company_name]))
-
-  @property
-  def opted_out(self) -> bool:
-    return bool(self.opt_out_source)
-
-  @property
   def ctct_source(self) -> dict:
     if self.exists_remotely:
       source = {'update_source': self.update_source}
@@ -424,11 +410,7 @@ class Contact(CTCTModel):
     ordering = ('-updated_at', )
 
   def __str__(self) -> str:
-    if self.name and self.email:
-      s = f'{self.name} ({self.email})'
-    else:
-      s = self.email or self.name or 'N/A'
-    return s
+    return self.email
 
   def clean(self) -> None:
     self.email = self.email.lower().strip()

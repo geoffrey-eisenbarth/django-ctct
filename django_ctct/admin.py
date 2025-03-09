@@ -255,14 +255,16 @@ class ContactAdmin(RemoteModelAdmin):
     'email',
     'first_name',
     'last_name',
-    'company_name',
     'job_title',
+    'company_name',
   )
 
   list_display = (
     'email',
-    'name',
-    'job',
+    'first_name',
+    'last_name',
+    'job_title',
+    'company_name',
     'updated_at',
     'status',
   )
@@ -275,7 +277,7 @@ class ContactAdmin(RemoteModelAdmin):
   def status(self, obj: Contact) -> str:
     if not obj.exists_remotely:
       text, color = 'Not Synced', 'bad'
-    elif obj.opted_out:
+    elif obj.opt_out_source:
       text, color = 'Opted Out', 'warn'
     else:
       text, color = 'Synced', 'ok'
@@ -327,7 +329,7 @@ class ContactAdmin(RemoteModelAdmin):
     obj: Optional[Contact] = None,
   ) -> List[str]:
     readonly_fields = Contact.remote.API_READONLY_FIELDS
-    if obj and obj.opted_out and not request.user.is_superuser:
+    if obj and obj.opt_out_source and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
 
