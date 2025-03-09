@@ -4,7 +4,17 @@ from django.conf import settings
 from django.db.models import Model
 
 from django_ctct.models import (
-  CTCTModel, Contact, ContactList, ContactAndContactList,
+  CustomField, Contact, ContactList, ContactAndContactList,
+  EmailCampaign, CampaignActivity,
+)
+
+
+CTCTRemoteModels = (
+  ContactList,
+  CustomField,
+  Contact,
+  EmailCampaign,
+  CampaignActivity,
 )
 
 
@@ -17,7 +27,7 @@ def remote_save(
 ) -> None:
   """Create or update the instance on CTCT servers."""
 
-  if isinstance(instance, CTCTModel):
+  if isinstance(instance, CTCTRemoteModels):
     sender.remote.connect()
     if instance.exists_remotely:
       task = sender.remote.update
@@ -33,7 +43,7 @@ def remote_save(
 def remote_delete(sender, instance, **kwargs) -> None:
   """Delete the instance from CTCT servers."""
 
-  if isinstance(instance, CTCTModel):
+  if isinstance(instance, CTCTRemoteModels):
     sender.remote.connect()
     task = sender.remote.delete
 
