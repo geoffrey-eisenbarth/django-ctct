@@ -82,6 +82,8 @@ class TokenAdmin(ViewModelAdmin):
 class RemoteModelAdmin(admin.ModelAdmin):
   """Facilitate remote saving and deleting."""
 
+  exclude = ('exists_remotely', )
+
   @property
   def remote_sync(self) -> bool:
     sync_admin = getattr(settings, 'CTCT_SYNC_ADMIN', False)
@@ -213,7 +215,7 @@ class ContactStreetAddressInline(admin.StackedInline):
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.API_MAX_STREET_ADDRESSES
+  max_num = Contact.remote.API_MAX_STREET_ADDRESSES
 
 
 class ContactPhoneNumberInline(admin.TabularInline):
@@ -223,7 +225,7 @@ class ContactPhoneNumberInline(admin.TabularInline):
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.API_MAX_PHONE_NUMBERS
+  max_num = Contact.remote.API_MAX_PHONE_NUMBERS
 
 
 class ContactNoteInline(admin.TabularInline):
@@ -233,7 +235,7 @@ class ContactNoteInline(admin.TabularInline):
   exclude = ('api_id', )
 
   extra = 1
-  max_num = Contact.API_MAX_NOTES
+  max_num = Contact.remote.API_MAX_NOTES
 
   readonly_fields = ('author', 'created_at')
 
@@ -324,7 +326,7 @@ class ContactAdmin(RemoteModelAdmin):
     request: HttpRequest,
     obj: Optional[Contact] = None,
   ) -> List[str]:
-    readonly_fields = Contact.API_READONLY_FIELDS
+    readonly_fields = Contact.remote.API_READONLY_FIELDS
     if obj and obj.opted_out and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
@@ -433,9 +435,9 @@ class CampaignActivityInline(admin.StackedInline):
   max_num = 1
 
   def get_readonly_fields(self, request: HttpRequest, obj=None):
-    readonly_fields = CampaignActivity.API_READONLY_FIELDS
+    readonly_fields = CampaignActivity.remote.API_READONLY_FIELDS
     if obj and obj.current_status == 'DONE':
-      readonly_fields += CampaignActivity.API_EDITABLE_FIELDS
+      readonly_fields += CampaignActivity.remote.API_EDITABLE_FIELDS
     return readonly_fields
 
 
@@ -493,7 +495,7 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     return fieldsets
 
   def get_readonly_fields(self, request: HttpRequest, obj=None):
-    readonly_fields = EmailCampaign.API_READONLY_FIELDS
+    readonly_fields = EmailCampaign.remote.API_READONLY_FIELDS
     if obj and obj.current_status == 'DONE':
       readonly_fields += ('scheduled_datetime', )
     return readonly_fields

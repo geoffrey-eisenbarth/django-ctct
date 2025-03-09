@@ -14,18 +14,15 @@ from django.db.models.fields import NOT_PROVIDED
 from django.utils import timezone, formats
 from django.utils.translation import gettext_lazy as _
 
-from phonenumber_field.phonenumber import PhoneNumber
-from phonenumber_field.modelfields import PhoneNumberField
-
 from django_ctct.utils import to_dt
 from django_ctct.managers import (
   RemoteManager, TokenRemoteManager,
-  ContactListRemoteManager, ContactRemoteManager,
-  CampaignActivityRemoteManager,
+  ContactListRemoteManager, CustomFieldRemoteManager,
+  ContactRemoteManager, ContactNoteRemoteManager,
+  ContactPhoneNumberRemoteManager, ContactStreetAddressRemoteManager,
+  ContactCustomFieldRemoteManager,
+  EmailCampaignRemoteManager, CampaignActivityRemoteManager,
 )
-
-
-HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 
 class Token(Model):
@@ -63,6 +60,7 @@ class Token(Model):
     verbose_name=_('Scope'),
   )
   expires_in = models.IntegerField(
+    default=60 * 60 * 24,
     verbose_name=_('Expires In'),
   )
   created_at = models.DateTimeField(
@@ -94,17 +92,13 @@ class Token(Model):
       self.access_token,
       signing_key.key,
       algorithms=['RS256'],
-      audience=f'{CTCTModel.API_URL}{CTCTModel.API_VERSION}',
+      audience=f'{RemoteManager.API_URL}{RemoteManager.API_VERSION}',
     )
     return data
 
 
 class CTCTModel(Model):
   """Common CTCT model methods and properties."""
-
-  API_URL = 'https://api.cc.email'
-  API_VERSION = '/v3'
-  API_GET_QUERIES = {}
 
   # Must explicitly specify both
   objects = models.Manager()
@@ -126,33 +120,45 @@ class CTCTModel(Model):
   class Meta:
     abstract = True
 
+  @classmethod
+  def clean_remote_counts(cls, field_name: str, data: dict) -> int:
+    return data.get('unique_counts', {}).get(field_name, 0)
 
-class CTCTLocalModel(Model):
-  """Used to serialzie models that don't have API ids."""
-  objects = models.Manager()
-  remote = RemoteManager()
+  @classmethod
+  def clean_remote_string(cls, field_name: str, data: dict) -> str:
+    s = data.get(field_name, '')
+    s = s.replace('\n', ' ').replace('\t', ' ').strip()
+    max_length = cls.remote.API_MAX_LENGTH[field_name]
+    s = s[:max_length]
+    return s
 
-  class Meta:
-    abstract = True
+  @classmethod
+  def clean_remote_string_with_default(
+    cls,
+    field_name: str,
+    data: dict,
+    default: Optional[str] = None,
+  ) -> Optional[str]:
+    if default is None:
+      default = cls._meta.get_field(field_name).default
+      if default is NOT_PROVIDED:
+        message = _(
+          f"Must provide a default value for {cls.__name__}.{field_name}."
+        )
+        raise ValueError(message)
+
+    if field_name in data:
+      # If ConstantContact sends a `None` value, we get the default value
+      s = data[field_name] or default
+    else:
+      # A return value of `None` will remove the field from the cleaned dict
+      s = None
+
+    return s
 
 
 class ContactList(CTCTModel):
   """Django implementation of a CTCT Contact List."""
-
-  API_ENDPOINT = '/contact_lists'
-  API_ID_LABEL = 'list_id'
-  API_EDITABLE_FIELDS = (
-    'name',
-    'description',
-    'favorite',
-  )
-  API_READONLY_FIELDS = (
-    'created_at',
-    'updated_at',
-  )
-  API_MAX_LENGTH = {
-    'name': 255,
-  }
 
   # Must explicitly specify both
   objects = models.Manager()
@@ -160,7 +166,7 @@ class ContactList(CTCTModel):
 
   # API editable fields
   name = models.CharField(
-    max_length=API_MAX_LENGTH['name'],
+    max_length=remote.API_MAX_LENGTH['name'],
     verbose_name=_('Name'),
   )
   description = models.CharField(
@@ -196,21 +202,9 @@ class ContactList(CTCTModel):
 class CustomField(CTCTModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
-  API_ENDPOINT = '/contact_custom_fields'
-  API_ID_LABEL = 'custom_field_id'
-  API_EDITABLE_FIELDS = (
-    'label',
-    'type',
-  )
-  API_READONLY_FIELDS = (
-    'name',
-    'created_at',
-    'updated_at',
-  )
-  API_MAX_LENGTH = {
-    'label': 50,
-    'name': 50,
-  }
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = CustomFieldRemoteManager()
 
   TYPES = (
     ('string', 'Text'),
@@ -219,7 +213,7 @@ class CustomField(CTCTModel):
 
   # API editable fields
   label = models.CharField(
-    max_length=API_MAX_LENGTH['label'],
+    max_length=remote.API_MAX_LENGTH['label'],
     verbose_name=_('Label'),
     help_text=_(
       'The display name for the custom_field shown in the UI as free-form text'
@@ -235,14 +229,6 @@ class CustomField(CTCTModel):
   )
 
   # API read-only fields
-  name = models.CharField(
-    max_length=API_MAX_LENGTH['name'],
-    editable=False,
-    verbose_name=_('Name'),
-    help_text=_(
-      'Unique name constructed by replacing blanks with underscores'
-    ),
-  )
   created_at = models.DateTimeField(
     auto_now_add=True,
     verbose_name=_('Created At'),
@@ -277,49 +263,6 @@ class Contact(CTCTModel):
 
   """
 
-  API_ENDPOINT = '/contacts'
-  API_ID_LABEL = 'contact_id'
-  API_EDITABLE_FIELDS = (
-    'first_name',
-    'last_name',
-    'job_title',
-    'company_name',
-    'phone_numbers',
-    'street_addresses',
-    'custom_fields',
-    'list_memberships',
-    'notes',
-  )
-
-  API_READONLY_FIELDS = (
-    'created_at',
-    'updated_at',
-    'opt_out_source',
-    'opt_out_date',
-    'opt_out_reason',
-  )
-  API_GET_QUERIES = {
-    'include': ','.join([
-      'custom_fields',
-      'list_memberships',
-      'notes',
-      'phone_numbers',
-      'street_addresses',
-    ]),
-  }
-  API_MAX_LENGTH = {
-    'first_name': 50,
-    'last_name': 50,
-    'job_title': 50,
-    'company_name': 50,
-    'opt_out_reason': 255,
-  }
-  API_MAX_NOTES = 150
-  API_MAX_PHONE_NUMBERS = 3
-  API_MAX_STREET_ADDRESSES = 3
-  API_MAX_CUSTOM_FIELDS = 25
-  API_MAX_LIST_MEMBERSHIPS = 50
-
   # Must explicitly specify both
   objects = models.Manager()
   remote = ContactRemoteManager()
@@ -350,25 +293,25 @@ class Contact(CTCTModel):
     verbose_name=_('Email Address'),
   )
   first_name = models.CharField(
-    max_length=API_MAX_LENGTH['first_name'],
+    max_length=remote.API_MAX_LENGTH['first_name'],
     blank=True,
     verbose_name=_('First Name'),
     help_text=_('The first name of the contact'),
   )
   last_name = models.CharField(
-    max_length=API_MAX_LENGTH['last_name'],
+    max_length=remote.API_MAX_LENGTH['last_name'],
     blank=True,
     verbose_name=_('Last Name'),
     help_text=_('The last name of the contact'),
   )
   job_title = models.CharField(
-    max_length=API_MAX_LENGTH['job_title'],
+    max_length=remote.API_MAX_LENGTH['job_title'],
     blank=True,
     verbose_name=_('Job Title'),
     help_text=_('The job title of the contact'),
   )
   company_name = models.CharField(
-    max_length=API_MAX_LENGTH['company_name'],
+    max_length=remote.API_MAX_LENGTH['company_name'],
     blank=True,
     verbose_name=_('Company Name'),
     help_text=_('The name of the company where the contact works'),
@@ -447,7 +390,7 @@ class Contact(CTCTModel):
     verbose_name=_('Opted Out On'),
   )
   opt_out_reason = models.CharField(
-    max_length=API_MAX_LENGTH['opt_out_reason'],
+    max_length=remote.API_MAX_LENGTH['opt_out_reason'],
     blank=True,
     verbose_name=_('Opt Out Reason'),
   )
@@ -537,12 +480,12 @@ class ContactAndContactList(Model):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
   )
   contactlist = models.ForeignKey(
     ContactList,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
   )
 
   class Meta:
@@ -552,19 +495,12 @@ class ContactAndContactList(Model):
     #auto_created = True
 
 
-class ContactNote(CTCTLocalModel):
+class ContactNote(CTCTModel):
   """Django implementation of a CTCT Note."""
 
-  API_ID_LABEL = 'note_id'
-  API_EDITABLE_FIELDS = (
-    'note_id',
-    'content',
-    'created_at',  # Editable field, but set by Django db with auto_now
-  )
-  API_READONLY_FIELDS = tuple()
-  API_MAX_LENGTH = {
-    'content': 2000,
-  }
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactNoteRemoteManager()
 
   contact = models.ForeignKey(
     Contact,
@@ -581,15 +517,15 @@ class ContactNote(CTCTLocalModel):
   )
 
   # API editable fields
+  content = models.CharField(
+    max_length=remote.API_MAX_LENGTH['content'],
+    verbose_name=_('Content'),
+    help_text=_('The content for the note'),
+  )
   created_at = models.DateTimeField(
     auto_now=True,
     verbose_name=_('Created at'),
     help_text=_('The date the note was created'),
-  )
-  content = models.CharField(
-    max_length=API_MAX_LENGTH['content'],
-    verbose_name=_('Content'),
-    help_text=_('The content for the note'),
   )
 
   class Meta:
@@ -599,20 +535,18 @@ class ContactNote(CTCTLocalModel):
     # TODO PUSH:
     # constraints = [
     #   models.CheckConstraint(
-    #     check=Q(contact__notes__count__lte=Contact.API_MAX_NOTES),
+    #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NOTES),
     #     name='limit_notes'
     #   ),
     # ]
 
 
-class ContactPhoneNumber(CTCTLocalModel):
+class ContactPhoneNumber(CTCTModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
-  API_ID_LABEL = 'phone_number_id'
-  API_EDITABLE_FIELDS = (
-    'kind',
-    'phone_number',
-  )
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactPhoneNumberRemoteManager()
 
   MISSING_NUMBER = '000-000-0000'
   KINDS = (
@@ -637,7 +571,8 @@ class ContactPhoneNumber(CTCTLocalModel):
     verbose_name=_('Kind'),
     help_text=_('Identifies the type of phone number'),
   )
-  phone_number = PhoneNumberField(
+  phone_number = models.CharField(
+    max_length=25,
     verbose_name=_('Phone Number'),
     help_text=_("The contact's phone number"),
   )
@@ -654,7 +589,7 @@ class ContactPhoneNumber(CTCTLocalModel):
       # ),
       # TODO PUSH:
       # models.CheckConstraint(
-      #   check=Q(contact__phone_numbers__count__lte=Contact.API_MAX_PHONE_NUMBERS),
+      #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
       #   name='limit_phone_numbers',
       # ),
     ]
@@ -663,35 +598,21 @@ class ContactPhoneNumber(CTCTLocalModel):
     return f'[{self.get_kind_display()}] {self.phone_number}'
 
   @classmethod
-  def clean_remote_phone_number(cls, data: dict) -> Optional[PhoneNumber]:
+  def clean_remote_phone_number(cls, data: dict) -> str:
     numbers = r'\d+'
     if phone_number := ''.join(re.findall(numbers, data['phone_number'])):
-      phone_number = PhoneNumber.from_string(phone_number)
+      pass
     else:
-      phone_number = PhoneNumber.from_string(cls.MISSING_NUMBER)
+      phone_number = cls.MISSING_NUMBER
     return phone_number
 
 
-class ContactStreetAddress(CTCTLocalModel):
+class ContactStreetAddress(CTCTModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
-  API_ID_LABEL = 'street_address_id'
-  API_EDITABLE_FIELDS = (
-    'kind',
-    'street',
-    'city',
-    'state',
-    'postal_code',
-    'country',
-  )
-  API_READONLY_FIELDS = tuple()
-  API_MAX_LENGTH = {
-    'street': 255,
-    'city': 50,
-    'state': 50,
-    'postal_code': 50,
-    'country': 50,
-  }
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactStreetAddressRemoteManager()
 
   KINDS = (
     ('home', 'Home'),
@@ -715,27 +636,27 @@ class ContactStreetAddress(CTCTLocalModel):
     help_text=_('Describes the type of address'),
   )
   street = models.CharField(
-    max_length=API_MAX_LENGTH['street'],
+    max_length=remote.API_MAX_LENGTH['street'],
     verbose_name=_('Street'),
     help_text=_('Number and street of the address'),
   )
   city = models.CharField(
-    max_length=API_MAX_LENGTH['city'],
+    max_length=remote.API_MAX_LENGTH['city'],
     verbose_name=_('City'),
     help_text=_('The name of the city where the contact lives'),
   )
   state = models.CharField(
-    max_length=API_MAX_LENGTH['state'],
+    max_length=remote.API_MAX_LENGTH['state'],
     verbose_name=_('State'),
     help_text=_('The name of the state or province where the contact lives'),
   )
   postal_code = models.CharField(
-    max_length=API_MAX_LENGTH['postal_code'],
+    max_length=remote.API_MAX_LENGTH['postal_code'],
     verbose_name=_('Postal Code'),
     help_text=_('The zip or postal code of the contact'),
   )
   country = models.CharField(
-    max_length=API_MAX_LENGTH['country'],
+    max_length=remote.API_MAX_LENGTH['country'],
     verbose_name=_('Country'),
     help_text=_('The name of the country where the contact lives'),
   )
@@ -752,7 +673,7 @@ class ContactStreetAddress(CTCTLocalModel):
       # ),
       # TODO PUSH:
       # models.CheckConstraint(
-      #   check=Q(contact__street_addresses__count__lte=Contact.API_MAX_STREET_ADDRESSES),
+      #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
       #   name='limit_street_addresses',
       # ),
     ]
@@ -765,31 +686,27 @@ class ContactStreetAddress(CTCTLocalModel):
     return f'[{self.get_kind_display()}] {address}'
 
   @classmethod
-  def clean_remote_string(cls, s: str) -> str:
-    return s.replace('\n', ' ').replace('\t', ' ').strip()
-
-  @classmethod
   def clean_remote_street(cls, data: dict) -> str:
-    return cls.clean_remote_string(data.get('street', ''))
+    return cls.clean_remote_string('street', data)
 
   @classmethod
   def clean_remote_city(cls, data: dict) -> str:
-    return cls.clean_remote_string(data.get('city', ''))
+    return cls.clean_remote_string('city', data)
 
   @classmethod
   def clean_remote_state(cls, data: dict) -> str:
-    return cls.clean_remote_string(data.get('state', ''))
+    return cls.clean_remote_string('state', data)
 
   @classmethod
   def clean_remote_postal_code(cls, data: dict) -> str:
-    return cls.clean_remote_string(data.get('postal_code', ''))
+    return cls.clean_remote_string('postal_code', data)
 
   @classmethod
   def clean_remote_country(cls, data: dict) -> str:
-    return cls.clean_remote_string(data.get('country', ''))
+    return cls.clean_remote_string('country', data)
 
 
-class ContactCustomField(CTCTLocalModel):
+class ContactCustomField(CTCTModel):
   """Django implementation of a CTCT Contact's CustomField.
 
   Notes
@@ -800,15 +717,9 @@ class ContactCustomField(CTCTLocalModel):
 
   """
 
-  API_ID_LABEL = None
-  API_EDITABLE_FIELDS = (
-    'custom_field_id',
-    'value',
-  )
-  API_READONLY_FIELDS = tuple()
-  API_MAX_LENGTH = {
-    'value': 255,
-  }
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = ContactCustomFieldRemoteManager()
 
   contact = models.ForeignKey(
     Contact,
@@ -827,7 +738,7 @@ class ContactCustomField(CTCTLocalModel):
     verbose_name=_('Field'),
   )
   value = models.CharField(
-    max_length=API_MAX_LENGTH['value'],
+    max_length=remote.API_MAX_LENGTH['value'],
     verbose_name=_('Value'),
   )
 
@@ -843,7 +754,7 @@ class ContactCustomField(CTCTLocalModel):
       # ),
       # TODO PUSH:
       # models.CheckConstraint(
-      #   check=Q(contact__custom_fields__count__lte=Contact.API_MAX_CUSTOM_FIELDS),
+      #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
       #   name='limit_custom_fields',
       # ),
     ]
@@ -864,28 +775,9 @@ class ContactCustomField(CTCTLocalModel):
 class EmailCampaign(CTCTModel):
   """Django implementation of a CTCT EmailCampaign."""
 
-  API_ENDPOINT = '/emails'
-  API_ID_LABEL = 'campaign_id'
-  API_EDITABLE_FIELDS = (
-    'name',
-    'scheduled_datetime',
-  )
-  API_READONLY_FIELDS = (
-    'current_status',
-    'created_at',
-    'updated_at',
-    'sends',
-    'opens',
-    'clicks',
-    'forwards',
-    'optouts',
-    'abuse',
-    'bounces',
-    'not_opened',
-  )
-  API_MAX_LENGTH = {
-    'name': 80,
-  }
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = EmailCampaignRemoteManager()
 
   STATUSES = (
     ('NONE', 'Processing'),
@@ -899,7 +791,7 @@ class EmailCampaign(CTCTModel):
 
   # API editable fields
   name = models.CharField(
-    max_length=API_MAX_LENGTH['name'],
+    max_length=remote.API_MAX_LENGTH['name'],
     # unique=True,  # TODO PUSH: It seems like CTCT isn't enforcing this
     verbose_name=_('Name'),
   )
@@ -987,10 +879,6 @@ class EmailCampaign(CTCTModel):
       raise ValidationError(message)
 
   @classmethod
-  def clean_remote_counts(cls, stat: str, data: dict) -> int:
-    return data.get('unique_counts', {}).get(stat, 0)
-
-  @classmethod
   def clean_remote_sends(cls, data: dict) -> int:
     return cls.clean_remote_counts('sends', data)
 
@@ -1050,39 +938,6 @@ class CampaignActivity(CTCTModel):
 
   """
 
-  API_ENDPOINT = '/emails/activities'
-  API_ID_LABEL = 'campaign_activity_id'
-  API_EDITABLE_FIELDS = (
-    'from_name',
-    'from_email',
-    'reply_to_email',
-    'subject',
-    'preheader',
-    'html_content',
-    'physical_address_in_footer',
-  )
-  API_READONLY_FIELDS = (
-    'role',
-    'current_status',
-    'format_type',
-  )
-  API_MAX_LENGTH = {
-    'from_name': 100,
-    'from_email': 80,
-    'reply_to_email': 80,
-    'subject': 200,     # Not documented
-    'preheader': 130,   # Not documentred
-    'html_content': int(15e4),
-  }
-  API_GET_QUERIES = {
-    'include': ','.join([
-      # 'physical_address_in_footer',
-      # 'permalink_url',
-      'html_content',
-      # 'document_properties',
-    ]),
-  }
-
   # Must explicitly specify both
   objects = models.Manager()
   remote = CampaignActivityRemoteManager()
@@ -1111,22 +966,22 @@ class CampaignActivity(CTCTModel):
 
   # API editable fields
   from_name = models.CharField(
-    max_length=API_MAX_LENGTH['from_name'],
+    max_length=remote.API_MAX_LENGTH['from_name'],
     default=settings.CTCT_FROM_NAME,
     verbose_name=_('From Name'),
   )
   from_email = models.EmailField(
-    max_length=API_MAX_LENGTH['from_email'],
+    max_length=remote.API_MAX_LENGTH['from_email'],
     default=settings.CTCT_FROM_EMAIL,
     verbose_name=_('From Email'),
   )
   reply_to_email = models.EmailField(
-    max_length=API_MAX_LENGTH['reply_to_email'],
+    max_length=remote.API_MAX_LENGTH['reply_to_email'],
     default=getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL),
     verbose_name=_('Reply-to Email'),
   )
   subject = models.CharField(
-    max_length=API_MAX_LENGTH['subject'],
+    max_length=remote.API_MAX_LENGTH['subject'],
     verbose_name=_('Subject'),
     help_text=_(
       'The text to display in the subject line that describes the email '
@@ -1134,7 +989,7 @@ class CampaignActivity(CTCTModel):
     ),
   )
   preheader = models.CharField(
-    max_length=API_MAX_LENGTH['preheader'],
+    max_length=remote.API_MAX_LENGTH['preheader'],
     verbose_name=_('Preheader'),
     help_text=_(
       'Contacts will view your preheader as a short summary that follows '
@@ -1142,7 +997,7 @@ class CampaignActivity(CTCTModel):
     ),
   )
   html_content = models.CharField(
-    max_length=API_MAX_LENGTH['html_content'],
+    max_length=remote.API_MAX_LENGTH['html_content'],
     verbose_name=_('HTML Content'),
     help_text=_('The HTML content for the email campaign activity'),
   )
@@ -1211,31 +1066,6 @@ class CampaignActivity(CTCTModel):
     return data
 
   @classmethod
-  def clean_remote_string_with_default(
-    cls,
-    field_name: str,
-    data: dict,
-    default: Optional[str] = None,
-  ) -> Optional[str]:
-
-    if default is None:
-      default = cls._meta.get_field(field_name).default
-      if default is NOT_PROVIDED:
-        message = _(
-          f"Must provide a default value for {cls.__name__}.{field_name}."
-        )
-        raise ValueError(message)
-
-    if field_name in data:
-      # If ConstantContact sends a `None` value, we get the default value
-      s = data[field_name] or default
-    else:
-      # A return value of `None` will remove the field from the cleaned dict
-      s = None
-
-    return s
-
-  @classmethod
   def clean_remote_from_name(cls, data: dict) -> Optional[str]:
     return cls.clean_remote_string_with_default('from_name', data)
 
@@ -1277,10 +1107,10 @@ class CampaignActivityAndContactList(Model):
   campaignactivity = models.ForeignKey(
     CampaignActivity,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
   )
   contactlist = models.ForeignKey(
     ContactList,
     on_delete=models.CASCADE,
-    to_field='api_id',
+    #to_field='api_id',
   )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import partial
 from typing import TYPE_CHECKING, Optional, NoReturn
 from urllib.parse import urlencode
 
@@ -14,15 +15,14 @@ from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import models
 from django.db.models import Model
+from django.db.models import signals
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, Http404
 from django.middleware.csrf import get_token as get_csrf_token
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from django_tasks import task
-
-from django_ctct.utils import get_related_fields
+from django_ctct.utils import get_related_fields, mute_signals
 
 
 if TYPE_CHECKING:
@@ -35,17 +35,21 @@ if TYPE_CHECKING:
 class BaseRemoteManager(models.Manager):
   """Base manager for utilizing an API."""
 
+  API_URL = 'https://api.cc.email'
+  API_VERSION = '/v3'
+
+  @classmethod
   def get_url(
-    self,
+    cls,
     api_id: Optional[str] = None,
     endpoint: Optional[str] = None,
     endpoint_suffix: Optional[str] = None,
   ) -> str:
-    endpoint = endpoint or self.model.API_ENDPOINT
-    if not endpoint.startswith(self.API_VERSION):
-      endpoint = f'{self.API_VERSION}{endpoint}'
+    endpoint = endpoint or cls.API_ENDPOINT
+    if not endpoint.startswith(cls.API_VERSION):
+      endpoint = f'{cls.API_VERSION}{endpoint}'
 
-    url = f'{self.API_URL}{endpoint}'
+    url = f'{cls.API_URL}{endpoint}'
 
     if api_id:
       url += f'/{api_id}'
@@ -105,13 +109,13 @@ class TokenRemoteManager(BaseRemoteManager):
 
   API_URL = 'https://authz.constantcontact.com/oauth2/default'
   API_VERSION = '/v1'
-  API_SCOPES = (
+  API_SCOPE = '+'.join([
     'account_read',
     'account_update',
     'contact_data',
     'campaign_data',
     'offline_access',
-  )
+  ])
 
   def get_auth_url(self, request: HttpRequest) -> str:
     """Returns a URL for logging into CTCT.com to grant permissions."""
@@ -121,7 +125,7 @@ class TokenRemoteManager(BaseRemoteManager):
       'redirect_uri': settings.CTCT_REDIRECT_URI,
       'response_type': 'code',
       'state': get_csrf_token(request),
-      'scope': '+'.join(self.API_SCOPES),
+      'scope': self.API_SCOPE,
     }
     url = f"{endpoint}?{urlencode(data, safe='+')}"
     return url
@@ -166,6 +170,7 @@ class TokenRemoteManager(BaseRemoteManager):
     try:
       token.decode()
     except ExpiredSignatureError:
+      self.connect()
       token = self.update(token)
 
     return token
@@ -188,10 +193,19 @@ class TokenRemoteManager(BaseRemoteManager):
 class RemoteManager(BaseRemoteManager):
   """Manager for utilizing the CTCT API."""
 
-  API_URL = 'https://api.cc.email'
-  API_VERSION = '/v3'
   API_LIMIT_CALLS = 4   # four calls
   API_LIMIT_PERIOD = 1  # per second
+
+  API_ENDPOINT = ''
+  API_ID_LABEL = ''
+
+  API_GET_QUERIES = {}
+  API_EDITABLE_FIELDS = tuple()
+  API_READONLY_FIELDS = (
+    'api_id',
+  )
+
+  API_MAX_LENGTH = dict()
 
   TS_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 
@@ -208,12 +222,22 @@ class RemoteManager(BaseRemoteManager):
       'Authorization': f"{token.token_type} {token.access_token}"
     })
 
-  def serialize(self, obj: Model) -> dict:
+  def serialize(
+    self,
+    obj: Model,
+    field_types: Literal['editable', 'readonly', 'all'] = 'editable',
+  ) -> dict:
     """Convert from Django object to API request body."""
 
     data = {}
 
-    for field_name in obj.API_EDITABLE_FIELDS:
+    field_names = {
+      'editable': self.API_EDITABLE_FIELDS,
+      'readonly': self.API_READONLY_FIELDS,
+      'all': self.API_EDITABLE_FIELDS + self.API_READONLY_FIELDS,
+    }[field_types]
+
+    for field_name in field_names:
       try:
         field = self.model._meta.get_field(field_name)
       except FieldDoesNotExist:
@@ -224,10 +248,15 @@ class RemoteManager(BaseRemoteManager):
 
       if field_name.endswith('_id'):
         # Convert related object UUID to string
-        value = str(getattr(obj, field_name))
+        if (value := getattr(obj, field_name)) is not None:
+          value = str(value)
+        if field_name == 'api_id':
+          field_name = self.model.remote.API_ID_LABEL
+
       elif isinstance(field, models.DateTimeField):
         # Convert datetime to string
-        value = getattr(obj, field_name).strftime(self.TS_FORMAT)
+        if (value := getattr(obj, field_name)) is not None:
+          value = value.strftime(self.TS_FORMAT)
       elif not field.is_relation:
         value = getattr(obj, field_name)
       elif field.many_to_many:
@@ -238,12 +267,22 @@ class RemoteManager(BaseRemoteManager):
           value = []
       elif field.one_to_many:
         if obj.pk:
-          serialize = field.related_model.remote.serialize
+          if not hasattr(field.related_model, 'remote'):
+            continue
+          serialize = partial(
+            field.related_model.remote.serialize,
+            field_types=field_types,
+          )
           value = [serialize(_) for _ in getattr(obj, field_name).all()]
         else:
           value = []
       elif field.one_to_one or field.many_to_one:
-        serialize = field.related_model.remote.serialize
+        if not hasattr(field.related_model, 'remote'):
+          continue
+        serialize = partial(
+          field.related_model.remote.serialize,
+          field_types=field_types,
+        )
         value = serialize(getattr(obj, field_name))
       data[field_name] = value
 
@@ -253,7 +292,11 @@ class RemoteManager(BaseRemoteManager):
 
     return data
 
-  def deserialize(self, data: dict) -> (Model, dict):
+  def deserialize(
+    self,
+    data: dict,
+    pk: Optional[int] = None,
+  ) -> (Model, dict):
     """Convert from API response body to Django object."""
 
     if not isinstance(data, dict):
@@ -261,12 +304,12 @@ class RemoteManager(BaseRemoteManager):
       raise ValueError(message)
 
     try:
-      data['api_id'] = data.pop(self.model.API_ID_LABEL)
+      data['api_id'] = data.pop(self.API_ID_LABEL)
     except AttributeError:
-      message = f"{self.model} is missing the `API_ID_LABEL` attribute."
+      message = f"{self} is missing the `API_ID_LABEL` attribute."
       raise ImproperlyConfigured(message)
     except KeyError as e:
-      if self.model.API_ID_LABEL is None:
+      if self.API_ID_LABEL is None:
         # e.g. ContactCustomField
         pass
       else:
@@ -280,8 +323,8 @@ class RemoteManager(BaseRemoteManager):
           data[field.name] = value
 
     # Set related objects
-    data = self.deserialize_related_obj_fields(data)
-    data, related_objs = self.deserialize_related_objs_fields(data)
+    data = self.deserialize_related_obj_fields(data, parent_pk=pk)
+    data, related_objs = self.deserialize_related_objs_fields(data, parent_pk=pk)
 
     # Restrict to the fields defined in the Django object
     # NOTE: We prefer `field.attname` over `field.name` in order to pick up
@@ -290,15 +333,21 @@ class RemoteManager(BaseRemoteManager):
       k: v for k, v in data.items()
       if k in [getattr(f, 'attname', f.name) for f in model_fields]
     }
-    obj = self.model(**data)
+    obj = self.model(pk=pk, **data)
 
     return obj, related_objs
 
-  def deserialize_related_obj_fields(self, data: dict) -> dict:
+  def deserialize_related_obj_fields(
+    self,
+    data: dict,
+    parent_pk: Optional[int] = None
+  ) -> dict:
     """Deserialize ForeignKeys and OneToOneFields.
 
     Notes
     -----
+    TODO: No longer true, not using `to_field='api_id'`
+
     These fields can be set using `_id` because `to_field` is set to `api_id`,
     so we don't need to return a `related_objs` dictionary like we do with
     ManyToManyFields and ReverseForeignKeys.
@@ -312,20 +361,28 @@ class RemoteManager(BaseRemoteManager):
         raise ValueError(message)
 
       related_data = data.pop(field.name)
-      if isinstance(related_data, str):
-        data[f'{field.name}_id'] = related_data
-      else:
-        # TODO PUSH: Not sure about this
-        raise NotImplementedError
-        obj, _ = field.related_model.remote.deserialize(related_data)
-        data[field.name] = obj
+      data[f'{field.name}_id'] = parent_pk
+      # TODO: to_field='api_id' method
+      #if isinstance(related_data, str):
+      #  data[f'{field.name}_id'] = related_data
+      #else:
+      #  # TODO PUSH: Not sure about this
+      #  raise NotImplementedError
+      #  obj, _ = field.related_model.remote.deserialize(related_data)
+      #  data[field.name] = obj
     return data
 
-  def deserialize_related_objs_fields(self, data: dict) -> (dict, dict):
+  def deserialize_related_objs_fields(
+    self,
+    data: dict,
+    parent_pk: Optional[int] = None,
+  ) -> (dict, dict):
     """Deserialize ManyToManyFields and ReverseForeignKeys.
 
     Notes
     -----
+    TODO: No longer true, not using `to_field='api_id'`
+
     In the case of ManyToManyFields, we just return a list of `api_id`s to
     help create ThroughModel instances.
 
@@ -335,11 +392,10 @@ class RemoteManager(BaseRemoteManager):
 
     _, mtms, _, rfks = get_related_fields(self.model)
     for field in filter(lambda f: f.name in data, mtms + rfks):
-
       if related_data := data.pop(field.name):
         if all(isinstance(_, dict) for _ in related_data):
           # Add in the parent object's `api_id`
-          parent = {field.remote_field.name: data['api_id']}
+          parent = {f'{field.remote_field.name}_id': parent_pk} # TODO: was data['api_id']}
           deserialize = field.related_model.remote.deserialize
           objs = [deserialize(datum | parent)[0] for datum in related_data]
           related_objs[field.related_model] = objs
@@ -392,9 +448,11 @@ class RemoteManager(BaseRemoteManager):
 
     obj, related_objs = self.deserialize(data)
 
-    obj.pk = pk
-    obj.exists_remotely = True
-    obj.save()
+    # Overwrite local obj with CTCT's response
+    with mute_signals(signals.post_save):
+      obj.pk = pk
+      obj.exists_remotely = True
+      obj.save()
 
     # TODO: Delete if RelatedModel is ManyToMany?
     for RelatedModel, objs in related_objs.items():
@@ -416,7 +474,7 @@ class RemoteManager(BaseRemoteManager):
 
     response = self.session.get(
       url=self.get_url(api_id),
-      params=self.model.API_GET_QUERIES,
+      params=self.API_GET_QUERIES,
     )
 
     try:
@@ -446,7 +504,7 @@ class RemoteManager(BaseRemoteManager):
 
       response = self.session.get(
         url=self.get_url(endpoint=endpoint),
-        params=self.model.API_GET_QUERIES,
+        params=self.API_GET_QUERIES,
       )
       data = self.raise_or_json(response)
 
@@ -492,18 +550,26 @@ class RemoteManager(BaseRemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data)
+    obj, related_objs = self.deserialize(data, pk=pk)
 
-    obj.pk = pk
-    obj.exists_remotely = True
-    obj.save()
+    # Overwrite local obj with CTCT's response
+    with mute_signals(signals.post_save):
+      obj.pk = pk
+      obj.exists_remotely = True
+      obj.save()
 
-    # TODO: only do this for ManyToMany?
+    # Upsert related models
     for RelatedModel, objs in related_objs.items():
-      try:
-        RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
-      except:
-        breakpoint()
+      RelatedModel.objects.bulk_create(
+        objs=objs,
+        update_conflicts=True,
+        unique_fields=['api_id'],
+        update_fields=[
+          f.name
+          for f in RelatedModel._meta.fields
+          if not f.primary_key and (f.name != 'api_id')
+        ],
+      )
 
     return obj
 
@@ -535,6 +601,22 @@ class RemoteManager(BaseRemoteManager):
 
 class ContactListRemoteManager(RemoteManager):
   """Extend RemoteManager to handle adding multiple Contacts."""
+
+  API_ENDPOINT = '/contact_lists'
+  API_ID_LABEL = 'list_id'
+  API_EDITABLE_FIELDS = (
+    'name',
+    'description',
+    'favorite',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'created_at',
+    'updated_at',
+  )
+  API_MAX_LENGTH = {
+    'name': 255,
+  }
 
   #@task(queue_name='ctct')
   def add_list_memberships(
@@ -572,8 +654,75 @@ class ContactListRemoteManager(RemoteManager):
       self.raise_or_json(response)
 
 
+class CustomFieldRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle CustomFields."""
+
+  API_ENDPOINT = '/contact_custom_fields'
+  API_ID_LABEL = 'custom_field_id'
+  API_EDITABLE_FIELDS = (
+    'label',
+    'type',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'name',
+    'created_at',
+    'updated_at',
+  )
+  API_MAX_LENGTH = {
+    'label': 50,
+    'name': 50,
+  }
+
+
 class ContactRemoteManager(RemoteManager):
-  """Extend RemoteManager to handle ContactLists."""
+  """Extend RemoteManager to handle Contacts."""
+
+  API_ENDPOINT = '/contacts'
+  API_ID_LABEL = 'contact_id'
+
+  API_EDITABLE_FIELDS = (
+    'email',
+    'first_name',
+    'last_name',
+    'job_title',
+    'company_name',
+    'phone_numbers',
+    'street_addresses',
+    'custom_fields',
+    'list_memberships',
+    'notes',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'created_at',
+    'updated_at',
+    'opt_out_source',
+    'opt_out_date',
+    'opt_out_reason',
+  )
+  API_GET_QUERIES = {
+    'include': ','.join([
+      'custom_fields',
+      'list_memberships',
+      'notes',
+      'phone_numbers',
+      'street_addresses',
+    ]),
+  }
+
+  API_MAX_LENGTH = {
+    'first_name': 50,
+    'last_name': 50,
+    'job_title': 50,
+    'company_name': 50,
+    'opt_out_reason': 255,
+  }
+  API_MAX_NOTES = 150
+  API_MAX_PHONE_NUMBERS = 3
+  API_MAX_STREET_ADDRESSES = 3
+  API_MAX_CUSTOM_FIELDS = 25
+  API_MAX_LIST_MEMBERSHIPS = 50
 
   # TODO: Get error 400 if no list_memberships
   #@task(queue_name='ctct')
@@ -611,8 +760,11 @@ class ContactRemoteManager(RemoteManager):
 
     obj, related_objs = self.deserialize(data)
 
-    obj.pk = pk
-    obj.save()
+    # Overwrite local obj with CTCT's response
+    with mute_signals(signals.post_save):
+      obj.pk = pk
+      obj.exists_remotely = True
+      obj.save()
 
     # TODO: only do this for ManyToMany?
     for RelatedModel, objs in related_objs.items():
@@ -643,8 +795,89 @@ class ContactRemoteManager(RemoteManager):
     return response
 
 
+class ContactNoteRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle ContactNotes."""
+
+  API_ID_LABEL = 'note_id'
+  API_EDITABLE_FIELDS = (
+    'content',
+    #'created_at',  # Editable field, but set by Django db with auto_now
+  )
+  API_MAX_LENGTH = {
+    'content': 2000,
+  }
+
+
+class ContactPhoneNumberRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle ContactPhoneNumbers."""
+
+  API_ID_LABEL = 'phone_number_id'
+  API_EDITABLE_FIELDS = (
+    'kind',
+    'phone_number',
+  )
+
+
+class ContactStreetAddressRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle ContactStreetAddresses."""
+
+  API_ID_LABEL = 'street_address_id'
+  API_EDITABLE_FIELDS = (
+    'kind',
+    'street',
+    'city',
+    'state',
+    'postal_code',
+    'country',
+  )
+  API_MAX_LENGTH = {
+    'street': 255,
+    'city': 50,
+    'state': 50,
+    'postal_code': 50,
+    'country': 50,
+  }
+
+
+class ContactCustomFieldRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle ContactCustomFields."""
+
+  API_ID_LABEL = 'custom_field_id'
+  API_EDITABLE_FIELDS = (
+    'custom_field_id',
+    'value',
+  )
+  API_MAX_LENGTH = {
+    'value': 255,
+  }
+
+
 class EmailCampaignRemoteManager(RemoteManager):
   """Extend RemoteManager to handle creating EmailCampaigns."""
+
+  API_ENDPOINT = '/emails'
+  API_ID_LABEL = 'campaign_id'
+  API_EDITABLE_FIELDS = (
+    'name',
+    'scheduled_datetime',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'current_status',
+    'created_at',
+    'updated_at',
+    'sends',
+    'opens',
+    'clicks',
+    'forwards',
+    'optouts',
+    'abuse',
+    'bounces',
+    'not_opened',
+  )
+  API_MAX_LENGTH = {
+    'name': 80,
+  }
 
   def serialize(self, obj: Model) -> dict:
     if obj.exists_remotely:
@@ -700,9 +933,11 @@ class EmailCampaignRemoteManager(RemoteManager):
         activity.save(update_fields=['api_id', 'exists_remotely'])
         break
 
-    obj.pk = pk
-    obj.exists_remotely = True
-    obj.save()
+    # Overwrite local obj with CTCT's response
+    with mute_signals(signals.post_save):
+      obj.pk = pk
+      obj.exists_remotely = True
+      obj.save()
 
     return obj
 
@@ -729,15 +964,51 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     obj, _ = self.deserialize(data)
 
-    obj.pk = pk
-    obj.exists_remotely = True
-    obj.save()
+    # Overwrite local obj with CTCT's response
+    with mute_signals(signals.post_save):
+      obj.pk = pk
+      obj.exists_remotely = True
+      obj.save()
 
     return obj
 
 
 class CampaignActivityRemoteManager(RemoteManager):
   """Extend RemoteManager to handle scheduling."""
+
+  API_ENDPOINT = '/emails/activities'
+  API_ID_LABEL = 'campaign_activity_id'
+  API_EDITABLE_FIELDS = (
+    'from_name',
+    'from_email',
+    'reply_to_email',
+    'subject',
+    'preheader',
+    'html_content',
+    'physical_address_in_footer',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'role',
+    'current_status',
+    'format_type',
+  )
+  API_MAX_LENGTH = {
+    'from_name': 100,
+    'from_email': 80,
+    'reply_to_email': 80,
+    'subject': 200,     # Not documented
+    'preheader': 130,   # Not documentred
+    'html_content': int(15e4),
+  }
+  API_GET_QUERIES = {
+    'include': ','.join([
+      # 'physical_address_in_footer',
+      # 'permalink_url',
+      'html_content',
+      # 'document_properties',
+    ]),
+  }
 
   #@task(queue_name='ctct')
   def create(self, obj: CampaignActivity) -> NoReturn:
