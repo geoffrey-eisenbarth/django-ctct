@@ -4,3 +4,5 @@ __pycache__/
 *.sqlite3
 migrations/
 local_settings.py
+tests/project/*.html
+tests/project/htmlcov/*
