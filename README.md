@@ -97,10 +97,12 @@ Explain how to install dev dependencies and run the tests for your app.
 
 ## Contributing
 
-Once version 0.1.0 is released on PyPI, the roadmap of new features is roughly:
+Once version 0.1.0 is released on PyPI, we hope to implement the following new features (in no particular order):
 
   * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc). This will be controlled by the `CTCT_SYNC_SIGNALS` setting.
   * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
+  * Add `models.CheckConstraint` and `models.UniqueConstraint` constraints that are currently commented out.
+  
 
 I'm always open to new suggestions, so please reach out on GitHub: https://github.com/geoffrey-eisenbarth/django-ctct/
 
