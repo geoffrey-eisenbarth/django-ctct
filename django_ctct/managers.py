@@ -461,7 +461,7 @@ class RemoteManager(BaseRemoteManager):
     return obj
 
   def get(self, api_id: str) -> (Optional[Model], dict):
-    """Get an existing object from the remote server.
+    """Gets an existing object from the remote server.
 
     Notes
     -----
@@ -487,7 +487,7 @@ class RemoteManager(BaseRemoteManager):
     return obj, related_objs
 
   def all(self, endpoint: Optional[str] = None) -> (list[Model], dict):
-    """Get all existing objects from the remote server.
+    """Gets all existing objects from the remote server.
 
     Notes
     -----
@@ -529,7 +529,7 @@ class RemoteManager(BaseRemoteManager):
 
   #@task(queue_name='ctct')
   def update(self, obj: Model) -> Model:
-    """Update exisiting Django object on the remote server.
+    """Updates an existing Django object on the remote server.
 
     Notes
     -----
@@ -573,9 +573,18 @@ class RemoteManager(BaseRemoteManager):
 
     return obj
 
+  # TODO: Actually, want this to not only delete ALL, but also delete a filtered QuerySet that is passed
+  #       e.g. Contact.objects.filter(name__startswith='end').delete()
   #@task(queue_name='ctct')
-  def delete(self, obj: Model, endpoint_suffix: Optional[str] = None) -> None:
-    """Delete existing Django object on the remote server.
+  def delete(
+    self,
+    obj: Optional[Model] = None,
+    endpoint_suffix: Optional[str] = None,
+  ) -> None:
+    """Deletes existing Django object(s) on the remote server.
+
+    *WARNING* If an `obj` is not specified, this method will delete ALL
+    instances from the remote server!
 
     Notes
     -----
@@ -587,14 +596,44 @@ class RemoteManager(BaseRemoteManager):
 
     """
 
-    self.check_api_limit()
 
-    url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
-    response = self.session.delete(url)
+    if obj is not None:
+      # Delete single object from remote server
+      url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
+      self.check_api_limit()
+      response = self.session.delete(url)
 
-    if response.status_code != 404:
-      # Allow 404
-      self.raise_or_json(response)
+      if response.status_code != 404:
+        # Allow 404
+        self.raise_or_json(response)
+
+    else:
+      # Delete all objects from remote server
+      if self.model is Contact:
+        API_MAX_IDS = 500
+        endpoint = '/activities/contact_delete'
+        api_ids = list(Contact.objects.values_list('api_id', flat=True))
+      elif self.model is ContactList:
+        API_MAX_IDS = 100
+        endpoint = '/activities/list_delete'
+        api_ids = list(ContactList.objects.values_list('api_id', flat=True))
+      elif self.model is CustomField:
+        API_MAX_IDS = 100
+        endpoint = '/activities/custom_fields_delete'
+        api_ids = list(CustomField.objects.values_list('api_id', flat=True))
+      else:
+        message = (
+          f"ConstantContact's API does not support bulk deletion of {self.model}."
+        )
+        raise NotImplementedError(message)
+
+      for i in range(0, len(api_ids), API_MAX_IDS):
+        self.check_api_limit()
+        response = self.session.post(
+          url=self.get_url(endpoint=endpoint),
+          json={api_id_label: api_ids[i:i + API_MAX_IDS]},
+        )
+        self.raise_or_json(response)
 
     return None
 
