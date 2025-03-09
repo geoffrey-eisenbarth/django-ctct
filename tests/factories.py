@@ -1,4 +1,5 @@
 import datetime as dt
+import uuid
 
 import factory
 import factory.fuzzy
@@ -13,7 +14,31 @@ from django_ctct import models as ctct_models
 from django_ctct.managers import TokenRemoteManager
 
 
-class UserFactory(factory.django.DjangoModelFactory):
+def get_factory(
+  model: ctct_models.CTCTModel,
+  include_related: bool = False,
+) -> DjangoModelFactory:
+  if include_related:
+    factories = {
+      ctct_models.Contact: ContactWithRelatedObjsFactory,
+      ctct_models.EmailCampaign: EmailCampaignWithRelatedObjsFactory,
+    }
+  else:
+    factories = {
+      ctct_models.Token: TokenFactory,
+      ctct_models.ContactList: ContactListFactory,
+      ctct_models.CustomField: CustomFieldFactory,
+      ctct_models.Contact: ContactFactory,
+      ctct_models.ContactNote: ContactNoteFactory,
+      ctct_models.ContactPhoneNumber: ContactPhoneNumberFactory,
+      ctct_models.ContactStreetAddress: ContactStreetAddressFactory,
+      ctct_models.EmailCampaign: EmailCampaignFactory,
+      ctct_models.CampaignActivity: CampaignActivityFactory,
+    }
+  return factories[model]
+
+
+class UserFactory(DjangoModelFactory):
   class Meta:
     model = get_user_model()
 
@@ -24,11 +49,11 @@ class UserFactory(factory.django.DjangoModelFactory):
   password = factory.django.Password('pw')
 
 
-class TokenFactory(factory.django.DjangoModelFactory):
+class TokenFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.Token
 
-  access_token = factory.Faker('text', max_nb_chars=1200)
+  access_token = factory.Faker('pystr', max_chars=1200)
   refresh_token = factory.Faker('pystr', max_chars=50)
   scope = TokenRemoteManager.API_SCOPE
 
@@ -66,6 +91,7 @@ class ContactNoteFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.ContactNote
 
+  api_id = factory.Faker('uuid4')
   author = factory.SubFactory(UserFactory)
   contact = factory.SubFactory(ContactFactory)
   content = factory.Faker('sentence')
@@ -75,10 +101,12 @@ class ContactPhoneNumberFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.ContactPhoneNumber
 
+  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
     _[0] for _ in ctct_models.ContactPhoneNumber.KINDS
   )
+  # TODO: Faker will add extensions, which are not supported by PhoneNumberField
   phone_number = factory.Faker('phone_number')
 
 
@@ -86,6 +114,7 @@ class ContactStreetAddressFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.ContactStreetAddress
 
+  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
     _[0] for _ in ctct_models.ContactStreetAddress.KINDS
@@ -101,9 +130,28 @@ class ContactCustomFieldFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.ContactCustomField
 
+  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   custom_field = factory.SubFactory(CustomFieldFactory)
   value = factory.Faker('word')
+
+
+class ContactWithRelatedObjsFactory(ContactFactory):
+  notes = factory.RelatedFactoryList(
+    factory=ContactNoteFactory,
+    factory_related_name='contact',
+    size=2,
+  )
+  phone_numbers = factory.RelatedFactoryList(
+    ContactPhoneNumberFactory,
+    factory_related_name='contact',
+    size=2,
+  )
+  street_addresses = factory.RelatedFactoryList(
+    factory=ContactStreetAddressFactory,
+    factory_related_name='contact',
+    size=2,
+  )
 
 
 class EmailCampaignFactory(DjangoModelFactory):
@@ -122,3 +170,21 @@ class CampaignActivityFactory(DjangoModelFactory):
   subject = factory.Faker('sentence')
   preheader = factory.Faker('sentence')
   html_content = factory.Faker('text')
+
+
+class EmailCampaignWithRelatedObjsFactory(ContactFactory):
+  notes = factory.RelatedFactoryList(
+    factory=ContactNoteFactory,
+    factory_related_name='contact',
+    size=2,
+  )
+  phone_numbers = factory.RelatedFactoryList(
+    ContactPhoneNumberFactory,
+    factory_related_name='contact',
+    size=2,
+  )
+  street_addresses = factory.RelatedFactoryList(
+    factory=ContactStreetAddressFactory,
+    factory_related_name='contact',
+    size=2,
+  )

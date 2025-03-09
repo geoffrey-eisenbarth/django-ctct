@@ -38,7 +38,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    'django_tasks',
     'django_ctct',
 ]
 
@@ -124,16 +123,6 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-
-# Installed app settings
-PHONENUMBER_DEFAULT_REGION = 'US'
-TASKS = {
-  'default': {
-    'BACKEND': 'django_tasks.backends.immediate.ImmediateBackend',
-    'QUEUES': ['default', 'ctct'],
-  },
-}
 
 # Django-CTCT settings
 CTCT_FROM_NAME = "Django CTCT"
