@@ -1,6 +1,8 @@
-# django-ctct: Constant Contact Integration for Django
+# Constant Contact Integration for Django
 
 This Django app provides a seamless interface to the Constant Contact API, allowing you to manage contacts, email campaigns, and other Constant Contact functionalities directly from your Django project.
+
+**Warning:** This package is under active development. While it is our intention to develop with a consistent API going forward, we will not make promises until a later version is released.
 
 ## Installation
 
@@ -31,7 +33,6 @@ from django.urls import path, include
 
 urlpatterns = [
   path('admin/', admin.site.urls),
-  path('django-rq/', include('django_rq.urls')),  # Optional
   path('django-ctct/', include('django_ctct.urls')),
   # ... other URL patterns
 ]
@@ -46,49 +47,33 @@ CTCT_SECRET_KEY = "YOUR_SECRET_KEY"
 CTCT_REDIRECT_URI = "REDIRECT_URI_FROM_CTCT"
 CTCT_FROM_NAME = "YOUR_EMAIL_NAME"
 CTCT_FROM_EMAIL = "YOUR_EMAIL_ADDRESS"
-```
 
-Important:  Store your API credentials securely.  Avoid committing them directly to your version control repository.
-
-4) **Other Settings:**
-
-You'll want to set `settings.PHONENUMBER_DEFAULT_REGION` in order for `django-phonenumber-field` to work properly.
-
-5) **RQ Configuration (Optional, for Asynchronous Tasks)**:
-
-If you want to use `django-rq` for asynchronous tasks (recommended for API calls that might take a while), configure it in your `settings.py`:
-
-```Python
-RQ_QUEUES = {
-    'default': {
-        'HOST': 'localhost',  # Redis host
-        'PORT': 6379,       # Redis port
-        'DB': 0,            # Redis database
-        'PASSWORD': 'your_redis_password', # Redis password (if any)
-    },
-    'ctct': {  # Dedicated queue for Constant Contact tasks
-        'HOST': 'localhost',
-        'PORT': 6379,
-        'DB': 0,
-        'PASSWORD': 'your_redis_password',
-    },
+CTCT_REPLY_TO_EMAIL = "YOUR_REPLY_TO_ADDRESS"
+CTCT_PHYSICAL_ADDRESS = {
+  'address_line1': '1060 W Addison St',
+  'address_line2': '',
+  'address_optional': '',
+  'city': 'Chicago',
+  'country_code': 'US',
+  'country_name': 'United States',
+  'organization_name': 'Wrigley Field',
+  'postal_code': '60613',
+  'state_code': 'IL',
 }
 
-# Add django-rq to INSTALLED_APPS if you haven't already
-INSTALLED_APPS += ['django_rq']
+CTCT_USE_ADMIN = True       # Add django-ctct models to admin
+CTCT_SYNC_ADMIN = True      # Django admin CRUD operations will sync with ctct account
 ```
 
-Then, run the RQ worker:
+**Important:** Store your API credentials securely. Avoid committing them directly to your version control repository.
+The value for `CTCT_FROM_EMAIL` must be a verified email address for your ConstantContact.com account.
+`CTCT_REPLY_TO_EMAIL` will default to `CTCT_FROM_EMAIL` if not set.
+`CTCT_PHYSICAL_ADDRESS` will default to the information set in your ConstantContact.com account if not set.
 
-```Bash
-python manage.py rqworker ctct  # Or python manage.py rqworker for all queues
-```
-
-To view tasks in Django admin, you'll need to add `django-rq` to your `urls.py` as mentioned above.
 
 ## Usage
 
-Describe how to use your app.  Provide examples of common use cases.  For example:
+Describe how to use your app. Provide examples of common use cases. For example:
 
   * Managing Contacts: Explain how to create, update, and delete contacts using your app's models or API wrappers.
   * Email Campaigns: Show how to create, send, and manage email campaigns.
@@ -99,25 +84,32 @@ Describe how to use your app.  Provide examples of common use cases.  For exampl
 
 Explain how to install dev dependencies and run the tests for your app.
 
-  * `./manage.py migrate`
-  * `./manage.py runserver`
-  * Visit `127.0.0.1:8000/ctct/auth/` and log into CTCT
+  * `git clone git@github.com:geoffrey-eisenbarth/django-ctct.git`
+  * `cd django-ctct`
+  * `poetry install --with dev`
+  * `cd tests/project`
+  * `poetry run ./manage.py migrate`
+  * `poetry run ./manage.py runserver`
+  * visit `127.0.0.1:8000/ctct/auth/` and log into CTCT to set up your first Token
+  * `poetry run coverage run ./manage.py test`
+  * `poetry run coverage report`
+
 
 ## Contributing
 
-Explain how others can contribute to your app.
+Once version 0.1.0 is released on PyPI, the roadmap of new features is roughly:
+
+  * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc). This will be controlled by the `CTCT_SYNC_SIGNALS` setting.
+  * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
+
+I'm always open to new suggestions, so please reach out on GitHub: https://github.com/geoffrey-eisenbarth/django-ctct/
+
  
-To run tests:
-
-* `cd tests/project`
-* `poetry run coverage run ./manage.py test`
-* `poetry run coverage report`
-
 ## License
 
-Specify the license under which your app is distributed.  (e.g., MIT, GPL, etc.)
+This package is currently distributed under the MIT license.
 
 
 ## Support
 
-Provide contact information or a link to your issue tracker.
+If you have any issues or questions, please feel free to reach out to me on GitHub: https://github.com/geoffrey-eisenbarth/django-ctct/issues
