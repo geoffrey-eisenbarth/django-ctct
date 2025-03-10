@@ -132,6 +132,18 @@ CTCT_SYNC_ADMIN = True
 CTCT_SYNC_SIGNALS = False
 CTCT_ENQUEUE_DEFAULT = False
 
+CTCT_PHYSICAL_ADDRESS = {
+  'address_line1': '1060 W Addison St',
+  'address_line2': '',
+  'address_optional': '',
+  'city': 'Chicago',
+  'country_code': 'US',
+  'country_name': 'United States',
+  'organization_name': 'Wrigley Field',
+  'postal_code': '60613',
+  'state_code': 'IL',
+}
+
 ##################
 # LOCAL SETTINGS #
 ##################
