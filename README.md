@@ -42,12 +42,14 @@ urlpatterns = [
 You'll need to configure your ConstantContact API credentials in `settings.py`:
 
 ```python
+# Required settings
 CTCT_PUBLIC_KEY = "YOUR_PUBLIC_KEY"
 CTCT_SECRET_KEY = "YOUR_SECRET_KEY"
 CTCT_REDIRECT_URI = "REDIRECT_URI_FROM_CTCT"
 CTCT_FROM_NAME = "YOUR_EMAIL_NAME"
 CTCT_FROM_EMAIL = "YOUR_EMAIL_ADDRESS"
 
+# Optional settings
 CTCT_REPLY_TO_EMAIL = "YOUR_REPLY_TO_ADDRESS"
 CTCT_PHYSICAL_ADDRESS = {
   'address_line1': '1060 W Addison St',
@@ -60,15 +62,24 @@ CTCT_PHYSICAL_ADDRESS = {
   'postal_code': '60613',
   'state_code': 'IL',
 }
+CTCT_PREVIEW_RECIPIENTS = (
+  ('First Recipient', 'first@recipient.com'),
+  ('Second Recipient', 'second@recipient.com'),
+)
+CTCT_PREVIEW_MESSAGE = "This is an EmailCampaign preview."
 
-CTCT_USE_ADMIN = True       # Add django-ctct models to admin
-CTCT_SYNC_ADMIN = True      # Django admin CRUD operations will sync with ctct account
+# Optional functionality settings and their default settings
+CTCT_USE_ADMIN = False       # Add django-ctct models to admin
+CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct account
 ```
 
 **Important:** Store your API credentials securely. Avoid committing them directly to your version control repository.
-The value for `CTCT_FROM_EMAIL` must be a verified email address for your ConstantContact.com account.
-`CTCT_REPLY_TO_EMAIL` will default to `CTCT_FROM_EMAIL` if not set.
-`CTCT_PHYSICAL_ADDRESS` will default to the information set in your ConstantContact.com account if not set.
+
+  * `CTCT_FROM_EMAIL` must be a verified email address for your ConstantContact.com account.
+  * `CTCT_REPLY_TO_EMAIL` will default to `CTCT_FROM_EMAIL` if not set.
+  * `CTCT_PHYSICAL_ADDRESS` will default to the information set in your ConstantContact.com account if not set.
+  * `CTCT_PREVIEW_RECIPIENTS` will default to `settings.MANAGERS` if not set.
+  * `CTCT_PREVIEW_MESSAGE` will be blank by default.
 
 
 ## Usage
