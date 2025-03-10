@@ -1,7 +1,6 @@
 import datetime as dt
 import re
-from typing import Literal, Optional
-import uuid
+from typing import Optional
 
 import jwt
 
@@ -112,10 +111,6 @@ class CTCTModel(Model):
     unique=True,   # Note: None != None for uniqueness check
     verbose_name=_('API ID'),
   )
-  exists_remotely = models.BooleanField(
-    default=False,
-    verbose_name=_('Exists Remotely'),
-  )
 
   class Meta:
     abstract = True
@@ -157,7 +152,23 @@ class CTCTModel(Model):
     return s
 
 
-class ContactList(CTCTModel):
+class CTCTRemoteModel(CTCTModel):
+  """Django implementation of a CTCT model that has API endpoints."""
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = RemoteManager()
+
+  exists_remotely = models.BooleanField(
+    default=False,
+    verbose_name=_('Exists Remotely'),
+  )
+
+  class Meta:
+    abstract = True
+
+
+class ContactList(CTCTRemoteModel):
   """Django implementation of a CTCT Contact List."""
 
   # Must explicitly specify both
@@ -199,7 +210,7 @@ class ContactList(CTCTModel):
     return self.name
 
 
-class CustomField(CTCTModel):
+class CustomField(CTCTRemoteModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
   # Must explicitly specify both
@@ -246,7 +257,7 @@ class CustomField(CTCTModel):
     return self.label
 
 
-class Contact(CTCTModel):
+class Contact(CTCTRemoteModel):
   """Django implementation of a CTCT Contact.
 
   Notes
@@ -737,7 +748,7 @@ class ContactCustomField(CTCTModel):
 
 
 # TODO: EmailCampaign.current_status vs CampaignActivity.current_status
-class EmailCampaign(CTCTModel):
+class EmailCampaign(CTCTRemoteModel):
   """Django implementation of a CTCT EmailCampaign."""
 
   # Must explicitly specify both
@@ -764,6 +775,13 @@ class EmailCampaign(CTCTModel):
     blank=True,
     null=True,
     verbose_name=_('Scheduled'),
+    help_text=_('Leave blank to unschedule'),
+  )
+
+  # Internal fields
+  send_preview = models.BooleanField(
+    default=False,
+    verbose_name=_('Send Preview'),
   )
 
   # API read-only fields
@@ -782,42 +800,50 @@ class EmailCampaign(CTCTModel):
     verbose_name=_('Updated At'),
   )
   sends = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Sends'),
     help_text=_('The total number of unique sends'),
   )
   opens = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Opens'),
     help_text=_('The total number of unique opens'),
   )
   clicks = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Clicks'),
     help_text=_('The total number of unique clicks'),
   )
   forwards = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Forwards'),
     help_text=_('The total number of unique forwards'),
   )
   optouts = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Opt Out'),
     help_text=_('The total number of people who unsubscribed'),
   )
   abuse = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Spam'),
     help_text=_('The total number of people who marked as spam'),
   )
   bounces = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Bounces'),
     help_text=_('The total number of bounces'),
   )
   not_opened = models.IntegerField(
-    default=0,
+    null=True,
+    default=None,
     verbose_name=_('Not Opened'),
     help_text=_('The total number of people who didn\'t open'),
   )
@@ -890,7 +916,7 @@ class EmailCampaign(CTCTModel):
       return to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')
 
 
-class CampaignActivity(CTCTModel):
+class CampaignActivity(CTCTRemoteModel):
   """Django implementation of a CTCT CampaignActivity.
 
   Notes
@@ -986,6 +1012,9 @@ class CampaignActivity(CTCTModel):
     default='DRAFT',
     verbose_name=_('Current Status'),
   )
+
+  # Must be set to 5 on outgoing requests,
+  # but imports could have other values
   format_type = models.IntegerField(
     choices=FORMAT_TYPES,
     default=5,  # CustomCode API v3
