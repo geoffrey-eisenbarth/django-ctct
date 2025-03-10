@@ -1,8 +1,11 @@
+import functools
 from typing import List, Tuple, Optional
+
+from requests.exceptions import HTTPError
 
 from django import forms
 from django.conf import settings
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models.query import QuerySet
 from django.forms import ModelForm
 from django.forms.models import BaseInlineFormSet
@@ -18,6 +21,21 @@ from django_ctct.models import (
 )
 from django_ctct.signals import remote_save, remote_delete
 
+
+def catch_api_errors(func):
+  """Decorator to catch HTTP errors from CTCT API."""
+
+  @functools.wraps(func)
+  def wrapper(self, request, *args, **kwargs):
+    try:
+      return func(self, request, *args, **kwargs)
+    except HTTPError as e:
+      message = _(
+        f"API Error: {e}"
+      )
+      self.message_user(request, message, level=messages.ERROR)
+
+  return wrapper
 
 class ViewModelAdmin(admin.ModelAdmin):
   """Remove CRUD permissions."""
@@ -90,16 +108,35 @@ class RemoteModelAdmin(admin.ModelAdmin):
     sync_signals = getattr(settings, 'CTCT_SYNC_SIGNALS', False)
     return sync_admin and not sync_signals
 
+  @catch_api_errors
   def save_model(self, request: HttpRequest, obj, form, change):
     super().save_model(request, obj, form, change)
-    if self.remote_sync:
+    if self.remote_sync and not self.inlines:
+      # If the primary object has related objects, we defer until `save_formset()`
       remote_save(sender=self.model, instance=obj, created=not change)
 
+  @catch_api_errors
+  def save_formset(
+    self,
+    request: HttpRequest,
+    form: ModelForm,
+    formset: BaseInlineFormSet,
+    change: bool,
+  ) -> None:
+    super().save_formset(request, form, formset, change)
+    breakpoint()
+    if self.remote_sync:
+      # Remote save the primary object after related objects have been saved
+      # NOTE: The `change` arg refers to the parent object, not the formset
+      remote_save(sender=self.model, instance=form.instance, created=not change)
+
+  @catch_api_errors
   def delete_model(self, request: HttpRequest, obj):
     super().delete_model(request, obj)
     if self.remote_sync:
       remote_delete(sender=self.model, instance=obj)
 
+  @catch_api_errors
   def delete_queryset(self, request: HttpRequest, queryset):
     if self.remote_sync:
       message = _("CTCT bulk activities not implemented yet.")
@@ -108,6 +145,8 @@ class RemoteModelAdmin(admin.ModelAdmin):
       super().delete_queryset(request, queryset)
 
   # TODO: How to get `sender` and `action`?
+  # NOTE: save_related is only used for ManyToMany
+  @catch_api_errors
   def save_related(self, request: HttpRequest, obj, form, change):
     super().save_related(request, obj, form, change)
     if self.remote_sync:
@@ -167,11 +206,12 @@ class CustomFieldAdmin(RemoteModelAdmin):
   list_display = (
     'label',
     'type',
-    'api_id',
+    'created_at',
+    'exists_remotely',
   )
 
   # ChangeView
-  readonly_fields = ('api_id', )
+  exclude = ('api_id', 'exists_remotely', )
 
 
 class ContactStatusFilter(admin.SimpleListFilter):
@@ -386,37 +426,14 @@ class ContactNoteAdmin(ViewModelAdmin):
 class CampaignActivityInlineForm(forms.ModelForm):
   """Custom widget choices for ContactList admin."""
 
-  ACTIONS = (
-    ('NONE', 'Select Action'),
-    ('SCHEDULE', 'Schedule'),
-    ('UNSCHEDULE', 'Unschedule'),
-  )
-
   html_content = forms.CharField(
     widget=forms.Textarea,
     label=_('HTML Content'),
-  )
-  action = forms.ChoiceField(
-    choices=ACTIONS,
-    label=_('Action'),
   )
 
   class Meta:
     model = CampaignActivity
     fields = '__all__'
-
-# TODO: Implement actions
-#    if self.action == 'CREATE':
-#      activity.ctct_send_preview()
-#      self.current_status = 'DRAFT'
-#    elif self.action == 'SCHEDULE':
-#      activity.ctct_send_preview()
-#      activity.ctct_schedule()
-#      self.current_status = 'SCHEDULED'
-#    elif self.campaign.action == 'UNSCHEDULE':
-#      activity.ctct_unschedule()
-#      self.current_status = 'DRAFT'
-#    self.action = 'NONE'
 
 
 class CampaignActivityInline(admin.StackedInline):
@@ -425,10 +442,14 @@ class CampaignActivityInline(admin.StackedInline):
   model = CampaignActivity
   form = CampaignActivityInlineForm
   fields = (
-    'role', 'current_status', 'format_type',
+    'role', 'current_status',
     'from_name', 'from_email', 'reply_to_email',
     'subject', 'preheader', 'html_content',
-    'action',
+    'contact_lists',
+  )
+
+  filter_horizontal = (
+    'contact_lists',
   )
 
   extra = 1
@@ -488,7 +509,7 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     else:
       fieldsets = (
         (None, {
-          'fields': ('name', 'current_status', 'scheduled_datetime'),
+          'fields': ('name', 'current_status', 'scheduled_datetime', 'send_preview'),
         }),
       )
 
@@ -500,6 +521,8 @@ class EmailCampaignAdmin(RemoteModelAdmin):
       readonly_fields += ('scheduled_datetime', )
     return readonly_fields
 
+  # TODO: Maybe find a way to only trigger remote save if updating name?
+  @catch_api_errors
   def save_model(
     self,
     request: HttpRequest,
@@ -507,23 +530,41 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     form: ModelForm,
     change: bool,
   ) -> None:
-    super().save_model(request, obj, form, change)
-    message = {
-      'CREATE': _(
-        'Campaign has been created and a preview has been sent for approval. '
-        'Once the campaign has been approved, you must schedule it.'
-      ),
-      'UPDATE': _(
-        'The campaign has been updated and a preview has been sent out for approval.'  # noqa 501
-      ),
-      'SCHEDULE': _(
-        'The campaign has been scheduled and a preview has been sent out for approval.'  # noqa 501
-      ),
-      'UNSCHEDULE': _(
-        'The campaign has been unscheduled.'
-      ),
-    }[obj.action]
+    return super().save_model(request, obj, form, change)
+
+  # TODO: super() isn't saving CampaignActivities when they update
+  def save_formset(
+    self,
+    request: HttpRequest,
+    form: ModelForm,
+    formset: BaseInlineFormSet,
+    change: bool,
+  ) -> None:
+    response = super().save_formset(request, form, formset, change)
+
+    # Inform the user
+    if (form.instance.scheduled_datetime is not None):
+      message = _(
+        f"The campaign is scheduled to be sent {form.instance.scheduled_datetime}"  # noqa 501
+      )
+    elif change and ('scheduled_datetime' in form.changed_data):
+      message = _(
+        "The campaign has been unscheduled"
+      )
+    else:
+      message = _(
+        "The campaign has been created remotely"
+      )
+
+    if form.instance.send_preview:
+      message += _(
+        " and a preview has been sent out."
+      )
+    else:
+      message += "."
     self.message_user(request, message)
+
+    return response
 
 
 if getattr(settings, 'CTCT_USE_ADMIN', False):

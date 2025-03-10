@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import logging
 from functools import partial
 from typing import TYPE_CHECKING, Optional, NoReturn
 from urllib.parse import urlencode
@@ -30,6 +31,12 @@ if TYPE_CHECKING:
     Token, Contact, ContactList,
     EmailCampaign, CampaignActivity,
   )
+
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+log = logging.getLogger('urllib3')
+log.setLevel(logging.DEBUG)
 
 
 class BaseRemoteManager(models.Manager):
@@ -75,13 +82,17 @@ class BaseRemoteManager(models.Manager):
         data = data[0]
       # Models use 'error_message', Tokens use 'error_description'
       error_message = data.get('error_message', data.get('error_description'))
-      message = f"[{response.status_code}] {error_message}"
+      message = _(
+        f"[{response.status_code}] {error_message}"
+      )
       raise HTTPError(message, response=response)
 
     return data
 
   def _improperly_configured(self):
-    message = "You must define this method on a child class."
+    message = _(
+      "You must define this method on a child class."
+    )
     raise ImproperlyConfigured(message)
 
   def get_queryset(self):
@@ -161,7 +172,7 @@ class TokenRemoteManager(BaseRemoteManager):
 
     token = self.model.objects.first()
     if not token:
-      message = (
+      message = _(
         "No tokens in the database yet. "
         f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
       )
@@ -300,13 +311,19 @@ class RemoteManager(BaseRemoteManager):
     """Convert from API response body to Django object."""
 
     if not isinstance(data, dict):
-      message = f'Expected a {type({})}, got {type(data)}.'
+      message = _(
+        f"Expected a {type({})}, got {type(data)}."
+      )
       raise ValueError(message)
+    else:
+      data = data.copy()
 
     try:
       data['api_id'] = data.pop(self.API_ID_LABEL)
     except AttributeError:
-      message = f"{self} is missing the `API_ID_LABEL` attribute."
+      message = _(
+        f"{self} is missing the `API_ID_LABEL` attribute."
+      )
       raise ImproperlyConfigured(message)
     except KeyError as e:
       if self.API_ID_LABEL is None:
@@ -333,7 +350,15 @@ class RemoteManager(BaseRemoteManager):
       k: v for k, v in data.items()
       if k in [getattr(f, 'attname', f.name) for f in model_fields]
     }
-    obj = self.model(pk=pk, **data)
+
+    if pk:
+      # Preserve unrelated fields (e.g. EmailCampaign.send_preview)
+      obj = self.model.objects.get(pk=pk)
+      for field_attname, value in data.items():
+        setattr(obj, field_attname, value)
+    else:
+      # Instatiate new object
+      obj = self.model(**data)
 
     return obj, related_objs
 
@@ -346,30 +371,15 @@ class RemoteManager(BaseRemoteManager):
 
     Notes
     -----
-    TODO: No longer true, not using `to_field='api_id'`
-
-    These fields can be set using `_id` because `to_field` is set to `api_id`,
-    so we don't need to return a `related_objs` dictionary like we do with
-    ManyToManyFields and ReverseForeignKeys.
+    These fields can be set using `field.attname`, so we don't need to return a
+    `related_objs` dictionary like we do with ManyToManyFields and
+    ReverseForeignKeys.
 
     """
 
     otos, _, fks, _ = get_related_fields(self.model)
-    for field in filter(lambda f: f.name in data, otos + fks):
-      if not isinstance(field, (models.ForeignKey, models.OneToOneField)):
-        message = f'Expected ForeignKey or OneToOneField, got {type(field)}.'
-        raise ValueError(message)
-
-      related_data = data.pop(field.name)
-      data[f'{field.name}_id'] = parent_pk
-      # TODO: to_field='api_id' method
-      #if isinstance(related_data, str):
-      #  data[f'{field.name}_id'] = related_data
-      #else:
-      #  # TODO PUSH: Not sure about this
-      #  raise NotImplementedError
-      #  obj, _ = field.related_model.remote.deserialize(related_data)
-      #  data[field.name] = obj
+    for field in filter(lambda f: f.attname in data, otos + fks):
+      data[field.attname] = parent_pk
     return data
 
   def deserialize_related_objs_fields(
@@ -446,15 +456,15 @@ class RemoteManager(BaseRemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data)
+    obj, related_objs = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.pk = pk
       obj.exists_remotely = True
       obj.save()
 
     # TODO: Delete if RelatedModel is ManyToMany?
+    # TODO: Shouldn't local copies already be up to date? No need for this?
     for RelatedModel, objs in related_objs.items():
       RelatedModel.objects.bulk_create(objs, update_conflicts=False)
 
@@ -554,23 +564,11 @@ class RemoteManager(BaseRemoteManager):
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.pk = pk
       obj.exists_remotely = True
       obj.save()
 
-    # Upsert related models
-    for RelatedModel, objs in related_objs.items():
-      RelatedModel.objects.bulk_create(
-        objs=objs,
-        update_conflicts=True,
-        unique_fields=['api_id'],
-        update_fields=[
-          f.name
-          for f in RelatedModel._meta.fields
-          if not f.primary_key and (f.name != 'api_id')
-        ],
-      )
-
+    # NOTE: We don't need to do anything with `related_objs` since they were
+    # set locally before the API request
     return obj
 
   # TODO: Actually, want this to not only delete ALL, but also delete a filtered QuerySet that is passed
@@ -622,7 +620,7 @@ class RemoteManager(BaseRemoteManager):
         endpoint = '/activities/custom_fields_delete'
         api_ids = list(CustomField.objects.values_list('api_id', flat=True))
       else:
-        message = (
+        message = _(
           f"ConstantContact's API does not support bulk deletion of {self.model}."
         )
         raise NotImplementedError(message)
@@ -676,7 +674,7 @@ class ContactListRemoteManager(RemoteManager):
     if contacts is not None:
       contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
     else:
-      message = (
+      message = _(
         "Must pass a QuerySet of Contacts."
       )
       raise ValueError(message)
@@ -797,15 +795,15 @@ class ContactRemoteManager(RemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data)
+    obj, related_objs = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.pk = pk
       obj.exists_remotely = True
       obj.save()
 
     # TODO: only do this for ManyToMany?
+    # TODO: Is this needed? Shouldn't local db be up to date at this point?
     for RelatedModel, objs in related_objs.items():
       RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
 
@@ -826,7 +824,6 @@ class ContactRemoteManager(RemoteManager):
     in ConstantContact's database and can be revived at any time.
 
     """
-    return super().update(obj)
     if obj.list_memberships.exists():
       response = super().update(obj)
     else:
@@ -937,6 +934,8 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     """
 
+    from django_ctct.models import CampaignActivity
+
     # Validate
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
@@ -962,21 +961,26 @@ class EmailCampaignRemoteManager(RemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data)
+    obj, related_objs = self.deserialize(data, pk=pk)
 
-    # Update local objects
+    # Get the activity's api_id that CTCT assigned
     for related_obj in related_objs[CampaignActivity]:
       if related_obj.role == 'primary_email':
         activity.api_id = related_obj.api_id
-        activity.exists_remotely = True
-        activity.save(update_fields=['api_id', 'exists_remotely'])
         break
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.pk = pk
       obj.exists_remotely = True
       obj.save()
+
+      activity.exists_remotely = True
+      activity.save(update_fields=['api_id', 'exists_remotely'])
+
+    # Send preview and/or schedule the campaign
+    if obj.send_preview or (obj.scheduled_datetime is not None):
+      CampaignActivity.remote.connect()
+      CampaignActivity.remote.update(activity)
 
     return obj
 
@@ -986,7 +990,9 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     Notes
     -----
-    The only field that can be updated this way is the `name` field.
+    The only field that can be (remotely) updated this way is the `name` field.
+    In order to update `scheduled_datetime` on remote servers or send a preview,
+    the `primary_email` CampaignActivity must be updated remotely.
 
     """
     if not (pk := obj.pk):
@@ -1001,11 +1007,10 @@ class EmailCampaignRemoteManager(RemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, _ = self.deserialize(data)
+    obj, _ = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.pk = pk
       obj.exists_remotely = True
       obj.save()
 
@@ -1024,13 +1029,14 @@ class CampaignActivityRemoteManager(RemoteManager):
     'subject',
     'preheader',
     'html_content',
-    'physical_address_in_footer',
+    'contact_lists',
+    'format_type',                  # Must include in request
+    'physical_address_in_footer',   # Must incldue in request
   )
   API_READONLY_FIELDS = (
     'api_id',
     'role',
     'current_status',
-    'format_type',
   )
   API_MAX_LENGTH = {
     'from_name': 100,
@@ -1051,15 +1057,15 @@ class CampaignActivityRemoteManager(RemoteManager):
 
   #@task(queue_name='ctct')
   def create(self, obj: CampaignActivity) -> NoReturn:
-    message = (
+    message = _(
       "ConstantContact API does not support creating CampaignActivities. "
       "They are created during the creation of an EmailCampaign."
     )
     raise NotImplementedError(message)
 
   #@task(queue_name='ctct')
-  def update(self, obj: Model, send_preview: bool = False) -> Model:
-    """Update CampaignActivity on CTCT servers.
+  def update(self, obj: Model) -> Model:
+    """Update CampaignActivity on remote servers.
 
     Notes
     -----
@@ -1072,8 +1078,8 @@ class CampaignActivityRemoteManager(RemoteManager):
     """
 
     if obj.role != 'primary_email':
-      message = (
-        f'CampaignActivity with role `{obj.role}` not supported yet.'
+      message = _(
+        f"CampaignActivity with role `{obj.role}` not supported yet."
       )
       raise NotImplementedError(message)
 
@@ -1082,10 +1088,10 @@ class CampaignActivityRemoteManager(RemoteManager):
 
     obj = super().update(obj)
 
-    if send_preview:
+    if obj.campaign.send_preview:
       self.send_preview(obj)
 
-    if was_scheduled:
+    if was_scheduled or (obj.campaign.scheduled_datetime is not None):
       self.schedule(obj)
 
     return obj
@@ -1117,7 +1123,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     self.raise_or_json(response)
 
   #@task(queue_name='ctct')
-  def schedule(self, obj: CampaignActivity, update_first: bool = True) -> None:
+  def schedule(self, obj: CampaignActivity) -> None:
     """Schedules the `primary_email` CampaignActivity.
 
     Notes
@@ -1127,26 +1133,30 @@ class CampaignActivityRemoteManager(RemoteManager):
 
     """
 
-    # Validate role and scheduled_datetime
+    # Validate role, scheduled_datetime, and contact_lists
     if obj.role != 'primary_email':
-      message = (
+      message = _(
         f"Cannot schedule CampaignActivities with role '{obj.role}'."
       )
       raise ValueError(message)
 
-    if obj.scheduled_datetime is None:
-      message = "Must specify `scheduled_datetime`."
+    if obj.campaign.scheduled_datetime is None:
+      message = _(
+        "Must specify `scheduled_datetime`."
+      )
       raise ValueError(message)
 
-    # Receipients must be set before scheduling
-    if update_first:
-      response = self.update(obj)
+    if not obj.contact_lists.exists():
+      message = _(
+        "Must specify `contact_lists`."
+      )
+      raise ValueError(message)
 
-    # Finally, schedule the CampaignActivity
+    # Schedule the CampaignActivity
     self.check_api_limit()
     response = self.session.post(
       url=self.get_url(obj.api_id, endpoint_suffix='/schedules'),
-      json={'scheduled_date': obj.scheduled_datetime.isoformat()},
+      json={'scheduled_date': obj.campaign.scheduled_datetime.isoformat()},
     )
     self.raise_or_json(response)
 
@@ -1156,7 +1166,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     if obj.role == 'primary_email':
       self.delete(obj, endpoint_suffix='/schedules')
     else:
-      message = (
+      message = _(
         f"Cannot unschedule CampaignActivities with role '{obj.role}'."
       )
       raise ValueError(message)
