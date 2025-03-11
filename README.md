@@ -84,27 +84,41 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
 
 ## Usage
 
-Describe how to use your app. Provide examples of common use cases. For example:
+After the app has been installed and configured, you must generate your first auth token:
+  * Open up www.example.com/django-ctct/auth/ in your browser (or whatever domain you have set in `CTCT_REDIRECT_URI`)
+  * Use your ConstantContact credentials to log in
+  * At this point, `django-ctct` should use refresh tokens, so no need to manually log in again
 
-  * Managing Contacts: Explain how to create, update, and delete contacts using your app's models or API wrappers.
-  * Email Campaigns: Show how to create, send, and manage email campaigns.
-  * Django Admin Integration: Describe how your app integrates with the Django admin interface.
-  * Views and Templates (if applicable): Explain how to use your app's views and templates (if it provides any).
+If you wish to import data from ConstantContact.com into your local database (recommended), then run the following:
+
+```bash
+> ./manage.py import_ctct`
+```
+
+You will be asked before each model type is imported. **Note** ConstantContact does not provide a bulk API endpoint for fetching Campaign Activities, so depending on the size of your account, this might take some time and possible put you over their 10,000 request per day limit if you run it regularly.
+
+Since ConstantContact does not offer any webhooks, you will need to set up a cron job if you want your account to remain syncronized with ConstantContact's database. You can use the `--no-input` flag to bypass the interactive questions. The `--stats-only` flag is useful for running a cron job to keep EmailCampaign statistics updated.
+
+If you wish to use the Django admin to interact with ConstantContact, you must explicitly set the `CTCT_USE_ADMIN` and `CTCT_SYNC_ADMIN` settings to `True`.
 
 ## Testing
 
-Explain how to install dev dependencies and run the tests for your app.
+To install dev dependencies and run the tests, see the following:
 
-  * `git clone git@github.com:geoffrey-eisenbarth/django-ctct.git`
-  * `cd django-ctct`
-  * `poetry install --with dev`
-  * `cd tests/project`
-  * `poetry run ./manage.py migrate`
-  * `poetry run ./manage.py runserver`
-  * visit `127.0.0.1:8000/ctct/auth/` and log into CTCT to set up your first Token
-  * `poetry run coverage run ./manage.py test`
-  * `poetry run coverage report`
+```bash
+> git clone git@github.com:geoffrey-eisenbarth/django-ctct.git
+> cd django-ctct
+> poetry install --with dev
+> cd tests/project
+> poetry run ./manage.py migrate
+> poetry run ./manage.py runserer`
+```
+Visit `127.0.0.1:8000/ctct/auth/` and log into CTCT to set up your first Token
 
+```bash
+> poetry run coverage run ./manage.py test
+> poetry run coverage report
+```
 
 ## Contributing
 
