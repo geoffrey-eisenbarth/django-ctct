@@ -39,8 +39,8 @@ urlpatterns = [
 ```
 3) **ConstantContact API Credentials:**
 
-Head to `https://app.constantcontact.com/pages/dma/portal/` to set up your application with ConstantContact.
-Pay particular attention to the "Redirect URI" field: it's crucial that this matches your Django project's server name (with `/django-ctct-auth/` at the end).
+Head to https://app.constantcontact.com/pages/dma/portal/ to set up your application with ConstantContact.
+Pay particular attention to the "Redirect URI" field: it's crucial that this matches your Django project's server name (with `/django-ctct/auth/` at the end).
 For example, if your Django project is hosted at `www.example.com` with SSL, then the value should be `https://www.example.com/django-ctct/auth/`.
 If you're running Django's development server at `127.0.0.1:8000`, then you should set it to `http://127.0.0.1:8000/django-ctct/auth/`.
 After that's finished, you'll need to configure your ConstantContact API credentials in `settings.py`:
