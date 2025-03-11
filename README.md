@@ -39,7 +39,11 @@ urlpatterns = [
 ```
 3) **ConstantContact API Credentials:**
 
-You'll need to configure your ConstantContact API credentials in `settings.py`:
+Head to `https://app.constantcontact.com/pages/dma/portal/` to set up your application with ConstantContact.
+Pay particular attention to the "Redirect URI" field: it's crucial that this matches your Django project's server name (with `/django-ctct-auth/` at the end).
+For example, if your Django project is hosted at `www.example.com` with SSL, then the value should be `https://www.example.com/django-ctct/auth/`.
+If you're running Django's development server at `127.0.0.1:8000`, then you should set it to `http://127.0.0.1:8000/django-ctct/auth/`.
+After that's finished, you'll need to configure your ConstantContact API credentials in `settings.py`:
 
 ```python
 # Required settings
@@ -85,9 +89,9 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
 ## Usage
 
 After the app has been installed and configured, you must generate your first auth token:
-  * Open up www.example.com/django-ctct/auth/ in your browser (or whatever domain you have set in `CTCT_REDIRECT_URI`)
+  * Open up the `CTCT_REDIRECT_URI` address in your browser
   * Use your ConstantContact credentials to log in
-  * At this point, `django-ctct` should use refresh tokens, so no need to manually log in again
+  * From this point forward `django-ctct` should use refresh tokens, so no need to manually log in again
 
 If you wish to import data from ConstantContact.com into your local database (recommended), then run the following:
 
