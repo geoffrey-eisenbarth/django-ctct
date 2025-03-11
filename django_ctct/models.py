@@ -104,8 +104,6 @@ class CTCTModel(Model):
   remote = RemoteManager()
 
   api_id = models.UUIDField(
-    #default=uuid.uuid4,
-    #unique=True,
     null=True,     # Allow objects to be created without CTCT IDs
     default=None,  # Models often created without CTCT IDs
     unique=True,   # Note: None != None for uniqueness check
@@ -158,11 +156,6 @@ class CTCTRemoteModel(CTCTModel):
   # Must explicitly specify both
   objects = models.Manager()
   remote = RemoteManager()
-
-  exists_remotely = models.BooleanField(
-    default=False,
-    verbose_name=_('Exists Remotely'),
-  )
 
   class Meta:
     abstract = True
@@ -391,7 +384,7 @@ class Contact(CTCTRemoteModel):
 
   @property
   def ctct_source(self) -> dict:
-    if self.exists_remotely:
+    if self.api_id:
       source = {'update_source': self.update_source}
     else:
       source = {'create_source': self.create_source}
@@ -508,7 +501,7 @@ class ContactNote(CTCTModel):
     verbose_name = _('Note')
     verbose_name_plural = _('Notes')
 
-    # TODO PUSH:
+    # TODO PUSH: CheckConstraint
     # constraints = [
     #   models.CheckConstraint(
     #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NOTES),
@@ -558,12 +551,12 @@ class ContactPhoneNumber(CTCTModel):
     verbose_name_plural = _('Phone Numbers')
 
     constraints = [
-      # TODO PUSH: This doesn't seem enforced via CTCT
+      # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
       #   name='unique_phone_number',
       # ),
-      # TODO PUSH:
+      # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
       #   name='limit_phone_numbers',
@@ -642,12 +635,12 @@ class ContactStreetAddress(CTCTModel):
     verbose_name_plural = _('Street Addresses')
 
     constraints = [
-      # TODO PUSH: This doesn't seem enforced via CTCT
+      # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
       #   name='unique_street_address',
       # ),
-      # TODO PUSH:
+      # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
       #   name='limit_street_addresses',
@@ -723,12 +716,12 @@ class ContactCustomField(CTCTModel):
     verbose_name_plural = _('Custom Fields')
 
     constraints = [
-      # TODO PUSH: This doesn't seem enforced via CTCT
+      # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'custom_field'],
       #   name='unique_custom_field',
       # ),
-      # TODO PUSH:
+      # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
       #   name='limit_custom_fields',
@@ -768,7 +761,7 @@ class EmailCampaign(CTCTRemoteModel):
   # API editable fields
   name = models.CharField(
     max_length=remote.API_MAX_LENGTH['name'],
-    # unique=True,  # TODO PUSH: It seems like CTCT isn't enforcing this
+    # unique=True,  # TODO PUSH: UniqueConstraint not enforced by CTCT?
     verbose_name=_('Name'),
   )
   scheduled_datetime = models.DateTimeField(
@@ -946,6 +939,7 @@ class CampaignActivity(CTCTRemoteModel):
     (5, 'Custom code (API v3)'),
   )
   MISSING_SUBJECT = 'No Subject'
+  TRACKING_IMAGE = '[[trackingImage]]'
 
   campaign = models.ForeignKey(
     EmailCampaign,
@@ -1053,10 +1047,11 @@ class CampaignActivity(CTCTRemoteModel):
     return s
 
   def serialize(self, data: dict) -> dict:
-    # TODO Do we serialize contact_lists when first creating the EmailCampaign+CA payload?
-    # if self.exists_remotely and (contact_lists := data.pop('contact_lists', None)):
     if contact_lists := data.pop('contact_lists', None):
       data['contact_list_ids'] = contact_lists
+
+    if self.TRACKING_IMAGE not in data['html_content']:
+      data['html_content'] = self.TRACKING_IMAGE + '\n' + data['html_content']
     return data
 
   @classmethod

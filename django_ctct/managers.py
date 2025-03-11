@@ -272,8 +272,8 @@ class RemoteManager(BaseRemoteManager):
         value = getattr(obj, field_name)
       elif field.many_to_many:
         if obj.pk:
-          # TODO API: What if not str/UUID? Is exists_remotely needed? or is all() ok?
-          value = [str(_.api_id) for _ in getattr(obj, field_name).filter(exists_remotely=True)]
+          qs = getattr(obj, field_name).values_list('api_id', flat=True)
+          value = list(map(str, qs))
         else:
           value = []
       elif field.one_to_many:
@@ -387,16 +387,7 @@ class RemoteManager(BaseRemoteManager):
     data: dict,
     parent_pk: Optional[int] = None,
   ) -> (dict, dict):
-    """Deserialize ManyToManyFields and ReverseForeignKeys.
-
-    Notes
-    -----
-    TODO: No longer true, not using `to_field='api_id'`
-
-    In the case of ManyToManyFields, we just return a list of `api_id`s to
-    help create ThroughModel instances.
-
-    """
+    """Deserialize ManyToManyFields and ReverseForeignKeys."""
 
     related_objs = {}
 
@@ -404,14 +395,14 @@ class RemoteManager(BaseRemoteManager):
     for field in filter(lambda f: f.name in data, mtms + rfks):
       if related_data := data.pop(field.name):
         if all(isinstance(_, dict) for _ in related_data):
-          # Add in the parent object's `api_id`
-          parent = {f'{field.remote_field.name}_id': parent_pk} # TODO: was data['api_id']}
+          # Add in the parent object's pk
+          parent = {f'{field.remote_field.name}_id': parent_pk}
           deserialize = field.related_model.remote.deserialize
           objs = [deserialize(datum | parent)[0] for datum in related_data]
           related_objs[field.related_model] = objs
         elif all(isinstance(_, str) for _ in related_data):
-          # TODO API: What if api_ids were ints instead of uuids?
           # ManyToManyField, make a list of "through model" instances
+          # TODO PUSH: This relies on old code where API ids were used.
           ThroughModel = getattr(self.model, field.name).through
           model_attname = f'{field.model._meta.model_name}_id'
           other_attname = f'{field.related_model._meta.model_name}_id'
@@ -423,9 +414,6 @@ class RemoteManager(BaseRemoteManager):
             for related_obj_api_id in related_data
           ]
           related_objs[ThroughModel] = objs
-        else:
-          # Mix of dict and str
-          raise NotImplementedError
 
     return data, related_objs
 
@@ -459,14 +447,10 @@ class RemoteManager(BaseRemoteManager):
     obj, related_objs = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
+    # NOTE: We don't need to do anything with `related_objs` since they were
+    # set locally before the API request
     with mute_signals(signals.post_save):
-      obj.exists_remotely = True
       obj.save()
-
-    # TODO: Delete if RelatedModel is ManyToMany?
-    # TODO: Shouldn't local copies already be up to date? No need for this?
-    for RelatedModel, objs in related_objs.items():
-      RelatedModel.objects.bulk_create(objs, update_conflicts=False)
 
     return obj
 
@@ -519,7 +503,6 @@ class RemoteManager(BaseRemoteManager):
       data = self.raise_or_json(response)
 
       # Data contains two keys: '_links' and e.g. 'contacts',  'lists', etc
-      # TODO API: `_links`
       links = data.pop('_links', None)
       data = next(iter(data.values()))
       for row in data:
@@ -550,7 +533,7 @@ class RemoteManager(BaseRemoteManager):
 
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
-    elif not obj.exists_remotely:
+    elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
 
     self.check_api_limit()
@@ -563,26 +546,20 @@ class RemoteManager(BaseRemoteManager):
     obj, related_objs = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
-    with mute_signals(signals.post_save):
-      obj.exists_remotely = True
-      obj.save()
-
     # NOTE: We don't need to do anything with `related_objs` since they were
     # set locally before the API request
+    with mute_signals(signals.post_save):
+      obj.save()
+
     return obj
 
-  # TODO: Actually, want this to not only delete ALL, but also delete a filtered QuerySet that is passed
-  #       e.g. Contact.objects.filter(name__startswith='end').delete()
   #@task(queue_name='ctct')
   def delete(
     self,
-    obj: Optional[Model] = None,
+    obj: Model,
     endpoint_suffix: Optional[str] = None,
   ) -> None:
     """Deletes existing Django object(s) on the remote server.
-
-    *WARNING* If an `obj` is not specified, this method will delete ALL
-    instances from the remote server!
 
     Notes
     -----
@@ -594,46 +571,47 @@ class RemoteManager(BaseRemoteManager):
 
     """
 
+    url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
+    self.check_api_limit()
+    response = self.session.delete(url)
 
-    if obj is not None:
-      # Delete single object from remote server
-      url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
+    if response.status_code != 404:
+      # Allow 404
+      self.raise_or_json(response)
+
+  def bulk_delete(self, objs: list[Model]) -> None:
+    """Deletes multiple objects from remote server in batches."""
+
+    try:
+      api_max_ids = {
+        'Contact': 500,
+        'ContactList': 100,
+        'CustomField': 100,
+      }[self.model.__name__]
+      endpoint = {
+        'Contact': '/activities/contact_delete',
+        'ContactList': '/activities/list_delete',
+        'CustomField': '/activities/custom_fields_delete',
+      }[self.model.__name__]
+    except KeyError:
+      message = _(
+        f"ConstantContact's API does not support bulk deletion of {self.model.__name__}."
+      )
+      raise NotImplementedError(message)
+
+    # Prepare connection and payloads
+    self.connect()
+    api_id_label = self.model.remote.API_ID_LABEL + 's'
+    api_ids = [str(o.api_id) for o in objs]
+
+    # Remote delete in batches
+    for i in range(0, len(api_ids), api_max_ids):
       self.check_api_limit()
-      response = self.session.delete(url)
-
-      if response.status_code != 404:
-        # Allow 404
-        self.raise_or_json(response)
-
-    else:
-      # Delete all objects from remote server
-      if self.model is Contact:
-        API_MAX_IDS = 500
-        endpoint = '/activities/contact_delete'
-        api_ids = list(Contact.objects.values_list('api_id', flat=True))
-      elif self.model is ContactList:
-        API_MAX_IDS = 100
-        endpoint = '/activities/list_delete'
-        api_ids = list(ContactList.objects.values_list('api_id', flat=True))
-      elif self.model is CustomField:
-        API_MAX_IDS = 100
-        endpoint = '/activities/custom_fields_delete'
-        api_ids = list(CustomField.objects.values_list('api_id', flat=True))
-      else:
-        message = _(
-          f"ConstantContact's API does not support bulk deletion of {self.model}."
-        )
-        raise NotImplementedError(message)
-
-      for i in range(0, len(api_ids), API_MAX_IDS):
-        self.check_api_limit()
-        response = self.session.post(
-          url=self.get_url(endpoint=endpoint),
-          json={api_id_label: api_ids[i:i + API_MAX_IDS]},
-        )
-        self.raise_or_json(response)
-
-    return None
+      response = self.session.post(
+        url=self.get_url(endpoint=endpoint),
+        json={api_id_label: api_ids[i:i + api_max_ids]},
+      )
+      self.raise_or_json(response)
 
 
 class ContactListRemoteManager(RemoteManager):
@@ -761,8 +739,40 @@ class ContactRemoteManager(RemoteManager):
   API_MAX_CUSTOM_FIELDS = 25
   API_MAX_LIST_MEMBERSHIPS = 50
 
-  # TODO: Get error 400 if no list_memberships
+  def create(self, obj: Contact) -> Contact:
+    try:
+      response = super().create(obj)
+    except HTTPError as e:
+      if e.response.status_code == 409:
+        # Locate the resource via email address and update
+        response = self.update_or_create(obj)
+      else:
+        raise e
+    return response
+
   #@task(queue_name='ctct')
+  def update(self, obj: Contact) -> Optional[Contact]:
+    """Update Contact and ContactList membership on CTCT servers.
+
+    Notes
+    -----
+    The PUT call will overwrite all properties not included in the request
+    body with NULL, so we need to make sure the `serialize()` method
+    includes all important fields. While the `create_or_update()` method
+    supports partial updates, it won't allow us to remove a ContactList.
+
+    CTCT requires that all contacts be a member of at least one ContactList,
+    so in the event of removing someone from all lists, we should actually
+    issue a DELETE call; however, these 'deleted' Contacts retain their ID
+    in ConstantContact's database and can be revived at any time.
+
+    """
+    if obj.list_memberships.exists():
+      response = super().update(obj)
+    else:
+      response = self.delete(obj)
+    return response
+
   def update_or_create(self, obj: Contact) -> Contact:
     """Updates or creates the Contact based on `email`.
 
@@ -795,40 +805,15 @@ class ContactRemoteManager(RemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, related_objs = self.deserialize(data, pk=pk)
+    # CTCT doesn't return a full object at this endpoint
+    _, api_id = data.pop('action'), data.pop('contact_id')
+    if data:
+      raise ValueError(f'Unexpected response data: {data}.')
 
-    # Overwrite local obj with CTCT's response
+    # Save the API id
     with mute_signals(signals.post_save):
-      obj.exists_remotely = True
-      obj.save()
-
-    # TODO: only do this for ManyToMany?
-    # TODO: Is this needed? Shouldn't local db be up to date at this point?
-    for RelatedModel, objs in related_objs.items():
-      RelatedModel.objects.bulk_create(objs)  # TODO: update_conflicts=True,
-
-  #@task(queue_name='ctct')
-  def update(self, obj: Contact) -> Optional[Contact]:
-    """Update Contact and ContactList membership on CTCT servers.
-
-    Notes
-    -----
-    The PUT call will overwrite all properties not included in the request
-    body with NULL, so we need to make sure the `serialize()` method
-    includes all important fields. While the `create_or_update()` method
-    supports partial updates, it won't allow us to remove a ContactList.
-
-    CTCT requires that all contacts be a member of at least one ContactList,
-    so in the event of removing someone from all lists, we should actually
-    issue a DELETE call; however, these 'deleted' Contacts retain their ID
-    in ConstantContact's database and can be revived at any time.
-
-    """
-    if obj.list_memberships.exists():
-      response = super().update(obj)
-    else:
-      response = self.delete(obj)
-    return response
+      obj.api_id = api_id
+      obj.save(update_fields=['api_id'])
 
 
 class ContactNoteRemoteManager(RemoteManager):
@@ -916,7 +901,7 @@ class EmailCampaignRemoteManager(RemoteManager):
   }
 
   def serialize(self, obj: Model) -> dict:
-    if obj.exists_remotely:
+    if obj.api_id:
       # The only field that the API will update
       return {'name': obj.name}
     else:
@@ -971,11 +956,8 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
-      obj.exists_remotely = True
       obj.save()
-
-      activity.exists_remotely = True
-      activity.save(update_fields=['api_id', 'exists_remotely'])
+      activity.save(update_fields=['api_id'])
 
     # Send preview and/or schedule the campaign
     if obj.send_preview or (obj.scheduled_datetime is not None):
@@ -997,7 +979,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     """
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
-    elif not obj.exists_remotely:
+    elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
 
     self.check_api_limit()
@@ -1007,11 +989,12 @@ class EmailCampaignRemoteManager(RemoteManager):
     )
     data = self.raise_or_json(response)
 
-    obj, _ = self.deserialize(data, pk=pk)
+    obj, related_objs = self.deserialize(data, pk=pk)
 
     # Overwrite local obj with CTCT's response
+    # NOTE: We don't need to do anything with `related_objs` since they were
+    # set locally before the API request
     with mute_signals(signals.post_save):
-      obj.exists_remotely = True
       obj.save()
 
     return obj

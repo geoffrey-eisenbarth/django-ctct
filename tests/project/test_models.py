@@ -39,10 +39,7 @@ class ModelTest(TestCase):
     include_related = (self.model in [Contact, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
     with factory.django.mute_signals(models.signals.post_save):
-      self.existing_obj = self.factory.create(
-        api_id=uuid.uuid4(),
-        exists_remotely=True,
-      )
+      self.existing_obj = self.factory.create(api_id=uuid.uuid4())
 
     # Connect signals
     post_save.connect(remote_save)
@@ -92,7 +89,6 @@ class ModelTest(TestCase):
     # Verify API fields were added
     obj.refresh_from_db()
     self.assertIsNotNone(obj.api_id)
-    self.assertEqual(obj.exists_remotely, True)
 
   @patch('django_ctct.models.Token.decode')
   def test_update(self, token_decode: MagicMock):

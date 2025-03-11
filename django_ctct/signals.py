@@ -20,7 +20,7 @@ def remote_save(
 
   if isinstance(instance, CTCTRemoteModel):
     sender.remote.connect()
-    if instance.exists_remotely:
+    if instance.api_id:
       task = sender.remote.update
     else:
       task = sender.remote.create

@@ -25,13 +25,12 @@ from tests.factories import get_factory, TokenFactory
 
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
-# TODO:
-# 2) How to do inline customfield checking?
+# TODO: How to do inline customfield checking?
 @parameterized_class(
   ('model', ),
   [(ContactList, ), (CustomField, ), (Contact, )],
 )
-@override_settings(CTCT_SYNC_ADMIN=True)
+@override_settings(CTCT_SYNC_ADMIN=True, CTCT_RAISE_FOR_API=True)
 class ModelAdminTest(TestCase):
 
   def setUp(self):
@@ -53,10 +52,7 @@ class ModelAdminTest(TestCase):
     include_related = (self.model in [Contact, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
     with factory.django.mute_signals(models.signals.post_save):
-      self.existing_obj = self.factory.create(
-        api_id=uuid.uuid4(),
-        exists_remotely=True,
-      )
+      self.existing_obj = self.factory.create(api_id=uuid.uuid4())
 
   def tearDown(self):
     self.mock_api.stop()
@@ -154,7 +150,6 @@ class ModelAdminTest(TestCase):
     obj = self.model.objects.filter(**obj_data).first()
     self.assertIsNotNone(obj)
     self.assertIsNotNone(obj.api_id)
-    self.assertEqual(obj.exists_remotely, True)
 
     # Verify inline objects were created
     if inline_data:
@@ -165,6 +160,9 @@ class ModelAdminTest(TestCase):
     #    self.assertTrue(
     #      related_model.objects.filter(**data).exists()
     #    )
+
+    # Verify the number of requests that were made
+    self.assertEqual(self.mock_api.call_count, 1)
 
   # TODO: How to check updating inlines
   @patch('django_ctct.models.Token.decode')
@@ -216,6 +214,9 @@ class ModelAdminTest(TestCase):
     for field, value in other_obj_data.items():
       self.assertEqual(getattr(self.existing_obj, field), value)
 
+    # Verify the number of requests that were made
+    self.assertEqual(self.mock_api.call_count, 1)
+
   @patch('django_ctct.models.Token.decode')
   def test_delete(self, token_decode: MagicMock):
 
@@ -260,6 +261,9 @@ class ModelAdminTest(TestCase):
     #)
     #remote_obj, _ = self.model.remote.get(self.existing_obj.api_id)
     #self.assertIsNone(remote_obj)
+
+    # Verify the number of requests that were made
+    self.assertEqual(self.mock_api.call_count, 1)
 
 
 @parameterized_class(
