@@ -1,3 +1,3 @@
-* admin
-  * ACTIONS: create EmailCampaign then send preview then schedule
-  * Get admin ctct syling (.button, .badget, colors for .bad, .ok, .warn)
+* testing
+  * email campaign CRUD
+  * contact w/o list_memberships -> DELETE verb
