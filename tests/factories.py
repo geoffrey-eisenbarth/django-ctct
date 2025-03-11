@@ -75,7 +75,6 @@ class CustomFieldFactory(DjangoModelFactory):
   type = 'string'
 
 
-# TODO: list_memberships
 class ContactFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.Contact
@@ -106,7 +105,6 @@ class ContactPhoneNumberFactory(DjangoModelFactory):
   kind = factory.fuzzy.FuzzyChoice(
     _[0] for _ in ctct_models.ContactPhoneNumber.KINDS
   )
-  # TODO: Faker will add extensions, which are not supported by PhoneNumberField
   phone_number = factory.Faker('phone_number')
 
 
@@ -153,6 +151,15 @@ class ContactWithRelatedObjsFactory(ContactFactory):
     size=2,
   )
 
+  @factory.post_generation
+  def list_memberships(self, create, extracted, **kwargs):
+    if not create or not extracted:
+      # Simple build, or nothing to add, do nothing.
+      return
+
+    # Add the iterable of ContactLists using bulk addition
+    self.list_memberships.add(*extracted)
+
 
 class EmailCampaignFactory(DjangoModelFactory):
   class Meta:
@@ -161,7 +168,6 @@ class EmailCampaignFactory(DjangoModelFactory):
   name = factory.Sequence(lambda n: f'Email Campaign {n}')
 
 
-# TODO: contact_lists
 class CampaignActivityFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.CampaignActivity
@@ -171,20 +177,20 @@ class CampaignActivityFactory(DjangoModelFactory):
   preheader = factory.Faker('sentence')
   html_content = factory.Faker('text')
 
+  @factory.post_generation
+  def contact_lists(self, create, extracted, **kwargs):
+    if not create or not extracted:
+      # Simple build, or nothing to add, do nothing.
+      return
 
-class EmailCampaignWithRelatedObjsFactory(ContactFactory):
-  notes = factory.RelatedFactoryList(
-    factory=ContactNoteFactory,
-    factory_related_name='contact',
-    size=2,
+    # Add the iterable of ContactLists using bulk addition
+    self.contact_lists.add(*extracted)
+
+
+class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
+  campaign_activities = factory.RelatedFactoryList(
+    factory=CampaignActivityFactory,
+    factory_related_name='campaign',
+    size=1,
   )
-  phone_numbers = factory.RelatedFactoryList(
-    ContactPhoneNumberFactory,
-    factory_related_name='contact',
-    size=2,
-  )
-  street_addresses = factory.RelatedFactoryList(
-    factory=ContactStreetAddressFactory,
-    factory_related_name='contact',
-    size=2,
-  )
+

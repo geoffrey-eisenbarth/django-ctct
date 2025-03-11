@@ -52,7 +52,13 @@ class ModelAdminTest(TestCase):
     include_related = (self.model in [Contact, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
     with factory.django.mute_signals(models.signals.post_save):
-      self.existing_obj = self.factory.create(api_id=uuid.uuid4())
+      kwargs = {'api_id': uuid.uuid4()}
+      if self.model is Contact:
+        m2m_factory = get_factory(ContactList)
+        kwargs['list_memberships'] = [m2m_factory(), m2m_factory()]
+      elif self.model is EmailCampaign:
+        raise NotImplementedError('How to specify M2M on CampaignActivity?')
+      self.existing_obj = self.factory.create(**kwargs)
 
   def tearDown(self):
     self.mock_api.stop()
@@ -77,9 +83,19 @@ class ModelAdminTest(TestCase):
     return data
 
   def get_form_data(self, obj: CTCTModel) -> (dict, dict):
+    """Return data necessary to submit a ModelAdmin form (plus inlines)."""
+
+    # Primary form data
     obj_data = model_to_dict(obj, fields=self.model.remote.API_EDITABLE_FIELDS)
     obj_data = {k:v for k, v in obj_data.items() if v}
 
+    # Convert ManyToMany objects to pks
+    if obj.pk:
+      for field_name, value in obj_data.items():
+        if obj._meta.get_field(field_name).many_to_many:
+          obj_data[field_name] = [_.pk for _ in value]
+
+    # Inline form data data
     inline_data = {}
     inline_admins = {
       Contact: [
@@ -152,8 +168,10 @@ class ModelAdminTest(TestCase):
     self.assertIsNotNone(obj.api_id)
 
     # Verify inline objects were created
+    # TODO?
     if inline_data:
-      breakpoint()
+      pass
+      #breakpoint()
     #for inline_admin in self.get_inline_admins():
     #  related_model = inline_admin.model
     #  for data in self.get_object_data(method='POST', model=related_model, get_multiple=True):
@@ -165,6 +183,7 @@ class ModelAdminTest(TestCase):
     self.assertEqual(self.mock_api.call_count, 1)
 
   # TODO: How to check updating inlines
+  # TODO: Updating a Contact with no lists issues DELETE
   @patch('django_ctct.models.Token.decode')
   def test_update(self, token_decode: MagicMock):
 

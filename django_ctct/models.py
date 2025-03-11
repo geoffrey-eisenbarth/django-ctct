@@ -159,10 +159,12 @@ class CTCTRemoteModel(CTCTModel):
   # API read-only fields
   created_at = models.DateTimeField(
     default=timezone.now,
+    editable=False,
     verbose_name=_('Created At'),
   )
   updated_at = models.DateTimeField(
     default=timezone.now,
+    editable=False,
     verbose_name=_('Updated At'),
   )
 
@@ -308,7 +310,6 @@ class Contact(CTCTRemoteModel):
 
   list_memberships = models.ManyToManyField(
     ContactList,
-    #through='ContactAndContactList',
     related_name='members',
     verbose_name=_('List Memberships'),
     blank=True,
@@ -416,7 +417,6 @@ class ContactNote(CTCTModel):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='notes',
     verbose_name=_('Contact'),
   )
@@ -470,7 +470,6 @@ class ContactPhoneNumber(CTCTModel):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='phone_numbers',
     verbose_name=_('Contact'),
   )
@@ -534,7 +533,6 @@ class ContactStreetAddress(CTCTModel):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='street_addresses',
     verbose_name=_('Contact'),
   )
@@ -635,7 +633,6 @@ class ContactCustomField(CTCTModel):
   contact = models.ForeignKey(
     Contact,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='custom_fields',
     verbose_name=_('Contact'),
   )
@@ -644,7 +641,6 @@ class ContactCustomField(CTCTModel):
   custom_field = models.ForeignKey(
     CustomField,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='instances',
     verbose_name=_('Field'),
   )
@@ -878,7 +874,6 @@ class CampaignActivity(CTCTRemoteModel):
   campaign = models.ForeignKey(
     EmailCampaign,
     on_delete=models.CASCADE,
-    #to_field='api_id',
     related_name='campaign_activities',
     verbose_name=_('Campaign'),
   )
@@ -922,7 +917,6 @@ class CampaignActivity(CTCTRemoteModel):
   )
   contact_lists = models.ManyToManyField(
     ContactList,
-    #through='CampaignActivityAndContactList',
     related_name='campaign_activities',
     verbose_name=_('Contact Lists'),
   )
