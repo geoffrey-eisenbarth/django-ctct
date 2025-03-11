@@ -273,8 +273,8 @@ class ContactAdmin(RemoteModelAdmin):
     'job_title',
     'company_name',
     'updated_at',
-    'is_synced',
     'opted_out',
+    'is_synced',
   )
   list_filter = (
     'list_memberships',

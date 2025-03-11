@@ -480,17 +480,17 @@ class RemoteManager(BaseRemoteManager):
 
     return obj, related_objs
 
-  def all(self, endpoint: Optional[str] = None) -> (list[Model], dict):
+  def all(self, endpoint: Optional[str] = None) -> list[(Model, dict)]:
     """Gets all existing objects from the remote server.
 
     Notes
     -----
     This method will not save the object to the local database. We return
-    objects as well as a dictionary of the form {field_name: [RelatedModel()]}.
+    a list of (obj, {field_name: [RelatedModel()]}) tuples.
 
     """
 
-    objs, related_objs = [], defaultdict(list)
+    objs = []
 
     paginated = True
     while paginated:
@@ -502,23 +502,16 @@ class RemoteManager(BaseRemoteManager):
       )
       data = self.raise_or_json(response)
 
-      # Data contains two keys: '_links' and e.g. 'contacts',  'lists', etc
+      # Data only contains two keys: '_links' and e.g. 'contacts' or 'lists'
       links = data.pop('_links', None)
-      data = next(iter(data.values()))
-      for row in data:
-        obj, other = self.deserialize(row)
-        objs.append(obj)
-
-        # Merge related objects
-        for RelatedModel, instances in other.items():
-          related_objs[RelatedModel].extend(instances)
+      objs.extend(map(self.deserialize, data))
 
       try:
         endpoint = links.get('next').get('href')
       except AttributeError:
         paginated = False
 
-    return objs, related_objs
+    return objs
 
   #@task(queue_name='ctct')
   def update(self, obj: Model) -> Model:

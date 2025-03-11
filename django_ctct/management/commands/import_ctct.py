@@ -42,53 +42,75 @@ class Command(BaseCommand):
 
   def upsert(
     self,
-    Model: CTCTModel,
+    model: CTCTModel,
     objs: list[CTCTModel],
+    unique_fields: list[str] = ['api_id'],
     update_fields: Optional[list[str]] = None,
+    silent: bool = False,
   ) -> list[CTCTModel]:
 
     verb = 'Imported' if (update_fields is None) else 'Updated'
 
-    if getattr(Model, 'is_through_model', False):
+    # TODO: is_through_model depreciated
+    if getattr(model, 'is_through_model', False):
       breakpoint()
-      Model.objects.all().delete()
-      objs = Model.objects.bulk_create(objs)
+      model.objects.all().delete()
+      objs = model.objects.bulk_create(objs)
     else:
       # Perform upsert using `bulk_create()`
       if update_fields is None:
         update_fields = [
           f.name
-          for f in Model._meta.fields
+          for f in model._meta.fields
           if not f.primary_key and (f.name != 'api_id')
         ]
 
-      objs = Model.objects.bulk_create(
+      objs = model.objects.bulk_create(
         objs=objs,
         update_conflicts=True,
-        unique_fields=['api_id'],
+        unique_fields=unique_fields,
         update_fields=update_fields,
       )
 
     # Inform the user
-    message = self.style.SUCCESS(
-      f'{verb} {len(objs)} {Model.__name__} instances.'
-    )
-    self.stdout.write(message)
+    if not silent:
+      message = self.style.SUCCESS(
+        f'{verb} {len(objs)} {model.__name__} instances.'
+      )
+      self.stdout.write(message)
 
     return objs
 
-  def import_model(self, Model: CTCTModel) -> None:
+  def import_model(self, model: CTCTModel) -> None:
     """Imports objects from CTCT into Django's database."""
 
-    if Model is CampaignActivity:
+    if model is CampaignActivity:
       return self.import_campaign_activities()
 
-    Model.remote.connect()
-    objs, related_objs = Model.remote.all()
-    objs = self.upsert(Model, objs)
+    model.remote.connect()
+    try:
+      objs, related_objs = zip(*model.remote.all())
+    except ValueError:
+      # No values returned
+      return
 
-    for RelatedModel, objs in related_objs.items():
-      objs = self.upsert(RelatedModel, objs)
+    # Upsert models to get Django pks
+    objs_w_pks = self.upsert(model, objs)
+
+    for obj, related_objs in zip(objs_w_pks, related_objs):
+      for related_model, objs in related_objs.items():
+
+        # TODO:
+        if related_model.__name__ == 'Contact_list_memberships':
+          continue
+
+        # Set the parent object pk
+        for field in related_model._meta.get_fields():
+          if getattr(field.remote_field, 'model', None) is model:
+            [setattr(o, field.attname, obj.pk) for o in objs]
+
+        # Upsert now that parent object pk has been set
+        objs = self.upsert(related_model, objs, silent=True)
 
   def import_campaign_activities(self) -> None:
     """Imports CampaignActivities from CTCT into Django's database."""
@@ -99,8 +121,8 @@ class Command(BaseCommand):
     CampaignActivity.remote.connect()
 
     # Use the EmailCampaign detail endpoint to get CampaignActivity api_ids
-    for api_id in tqdm(EmailCampaign.objects.values_list('api_id', flat=True)):
-      _, _related_objs = EmailCampaign.remote.get(api_id)
+    for campaign in tqdm(EmailCampaign.objects.exclude(api_id=None)):
+      _, _related_objs = EmailCampaign.remote.get(campaign.api_id)
 
       # Now we use the CampaignActivity detail endpoint to get remaining fields
       primary_emails = filter(
@@ -109,22 +131,30 @@ class Command(BaseCommand):
       )
       for api_id in map(attrgetter('api_id'), primary_emails):
         obj, _related_objs = CampaignActivity.remote.get(api_id)
+        obj.campaign_id = campaign.pk
 
         # Store objects for later
         # NOTE We updated `related_obj` with the values from `_related_objs`
-        for RelatedModel, instances in _related_objs.items():
-          related_objs[RelatedModel].extend(instances)
+        for related_model, instances in _related_objs.items():
+          related_objs[related_model].extend(instances)
         if obj is not None:
           objs.append(obj)
 
     # Upsert objects and related objects
-    update_fields = ['role', 'subject', 'preheader', 'html_content']
-    objs = self.upsert(CampaignActivity, objs, update_fields=update_fields)
+    objs = self.upsert(
+      model=CampaignActivity,
+      objs=objs,
+      unique_fields=['campaign_id', 'role'],
+      update_fields=['role', 'subject', 'preheader', 'html_content']
+    )
 
-    for RelatedModel, objs in related_objs.items():
-      objs = self.upsert(RelatedModel, objs)
+    for related_model, objs in related_objs.items():
+      # TODO:
+      if related_model.__name__ == 'CampaignActivity_contact_lists':
+        continue
+      objs = self.upsert(related_model, objs)
 
-  def import_campaign_stats(self):
+  def import_campaign_stats(self) -> None:
     """"Imports EmailCampaign stats from CTCT into Django's database."""
 
     endpoint = '/reports/summary_reports/email_campaign_summaries'
@@ -135,8 +165,13 @@ class Command(BaseCommand):
     ]
 
     EmailCampaign.remote.connect()
-    objs, _ = EmailCampaign.remote.all(endpoint=endpoint)
-    objs = self.upsert(EmailCampaign, objs, update_fields=update_fields)
+    try:
+      objs, _ = zip(*EmailCampaign.remote.all(endpoint=endpoint))
+    except ValueError:
+      # No values returned
+      return
+    else:
+      objs = self.upsert(EmailCampaign, objs, update_fields=update_fields)
 
   def add_arguments(self, parser: ArgumentParser) -> None:
     """Allow optional keyword arguments."""
@@ -163,12 +198,12 @@ class Command(BaseCommand):
     if self.stats_only:
       self.CTCT_MODELS = []
 
-    for Model in self.CTCT_MODELS:
-      question = f'Import {Model.__name__}? (y/n): '
+    for model in self.CTCT_MODELS:
+      question = f'Import {model.__name__}? (y/n): '
       if self.noinput or (input(question).lower()[0] == 'y'):
-        self.import_model(Model)
+        self.import_model(model)
       else:
-        message = f'Skipping {Model.__name__}'
+        message = f'Skipping {model.__name__}'
         self.stdout.write(self.style.NOTICE(message))
 
     question = 'Update EmailCampaign statistics? (y/n): '

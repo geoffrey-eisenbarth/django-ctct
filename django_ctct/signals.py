@@ -4,8 +4,7 @@ from django.conf import settings
 from django.db.models import Model
 
 from django_ctct.models import (
-  CTCTRemoteModel, Contact, ContactList, ContactAndContactList,
-  EmailCampaign,
+  CTCTRemoteModel, Contact, ContactList, EmailCampaign,
 )
 
 
@@ -48,7 +47,9 @@ def remote_update_m2m(sender, instance, action, **kwargs):
   """Updates a Contact's list membership on CTCT servers."""
 
   actions = ['post_add', 'post_remove', 'post_clear']
-  if (sender is ContactAndContactList) and (action in actions):
+  # TODO PUSH: [signals] How to implement this?
+  #if (sender is ContactAndContactList) and (action in actions):
+  if action in actions:
 
     if isinstance(instance, Contact):
       Contact.remote.connect()

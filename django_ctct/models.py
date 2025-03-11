@@ -63,7 +63,6 @@ class Token(Model):
     verbose_name=_('Expires In'),
   )
   created_at = models.DateTimeField(
-    auto_now=False,
     auto_now_add=True,
     verbose_name=_('Created At'),
   )
@@ -157,6 +156,16 @@ class CTCTRemoteModel(CTCTModel):
   objects = models.Manager()
   remote = RemoteManager()
 
+  # API read-only fields
+  created_at = models.DateTimeField(
+    default=timezone.now,
+    verbose_name=_('Created At'),
+  )
+  updated_at = models.DateTimeField(
+    default=timezone.now,
+    verbose_name=_('Updated At'),
+  )
+
   class Meta:
     abstract = True
 
@@ -182,16 +191,6 @@ class ContactList(CTCTRemoteModel):
     default=False,
     verbose_name=_('Favorite'),
     help_text=_('Mark the list as a favorite'),
-  )
-
-  # API read-only fields
-  created_at = models.DateTimeField(
-    auto_now_add=True,
-    verbose_name=_('Created At'),
-  )
-  updated_at = models.DateTimeField(
-    auto_now=True,
-    verbose_name=_('Updated At'),
   )
 
   class Meta:
@@ -230,16 +229,6 @@ class CustomField(CTCTRemoteModel):
     help_text=_(
       'Specifies the type of value the custom_field field accepts'
     ),
-  )
-
-  # API read-only fields
-  created_at = models.DateTimeField(
-    auto_now_add=True,
-    verbose_name=_('Created At'),
-  )
-  updated_at = models.DateTimeField(
-    auto_now=True,
-    verbose_name=_('Updated At'),
   )
 
   class Meta:
@@ -341,25 +330,12 @@ class Contact(CTCTRemoteModel):
     verbose_name=_('Create Source'),
     help_text=_('Describes who added the contact'),
   )
-  created_at = models.DateTimeField(
-    auto_now=False,
-    default=timezone.now,
-    null=True,
-    verbose_name=_('Created At'),
-    help_text=_('Date and time that the resource was created'),
-  )
   update_source = models.CharField(
     max_length=7,
     choices=SOURCES,
     default='Account',
     verbose_name=_('Update Source'),
     help_text=_('Identifies who last updated the contact'),
-  )
-  updated_at = models.DateTimeField(
-    auto_now=True,
-    null=True,
-    verbose_name=_('Updated At'),
-    help_text=_('Date and time that the contact was last updated'),
   )
 
   opt_out_source = models.CharField(
@@ -430,40 +406,6 @@ class Contact(CTCTRemoteModel):
     return data
 
 
-class ContactAndContactList(Model):
-  """Custom through model that uses CTCT API ids.
-
-  Notes
-  -----
-  In order to bulk import the ManyToMany relationship between Contact and
-  ContactList, we create instances of the associated ThroughModel using the
-  API ids of Contact and ContactList. However, Django currently does not
-  support setting `to_field` in the Django-created ThroughModel, so we must
-  create our own ThroughModel in order specify the `to_field` values for the
-  ForeignKeys.
-
-  """
-
-  is_through_model = True
-
-  contact = models.ForeignKey(
-    Contact,
-    on_delete=models.CASCADE,
-    #to_field='api_id',
-  )
-  contactlist = models.ForeignKey(
-    ContactList,
-    on_delete=models.CASCADE,
-    #to_field='api_id',
-  )
-
-  class Meta:
-    # https://code.djangoproject.com/ticket/12203#comment:22
-    # See GH: https://github.com/django/django/pull/18612
-    pass
-    #auto_created = True
-
-
 class ContactNote(CTCTModel):
   """Django implementation of a CTCT Note."""
 
@@ -492,7 +434,7 @@ class ContactNote(CTCTModel):
     help_text=_('The content for the note'),
   )
   created_at = models.DateTimeField(
-    auto_now=True,
+    default=timezone.now,
     verbose_name=_('Created at'),
     help_text=_('The date the note was created'),
   )
@@ -784,14 +726,6 @@ class EmailCampaign(CTCTRemoteModel):
     default='DRAFT',
     verbose_name=_('Current Status'),
   )
-  created_at = models.DateTimeField(
-    auto_now_add=True,
-    verbose_name=_('Created At'),
-  )
-  updated_at = models.DateTimeField(
-    auto_now=True,
-    verbose_name=_('Updated At'),
-  )
   sends = models.IntegerField(
     null=True,
     default=None,
@@ -845,7 +779,7 @@ class EmailCampaign(CTCTRemoteModel):
     verbose_name = _('Email Campaign')
     verbose_name_plural = _('Email Campaigns')
 
-    ordering = ('-updated_at', '-created_at', '-scheduled_datetime')
+    ordering = ('-created_at', '-scheduled_datetime')
 
   def __str__(self) -> str:
     return self.name
@@ -1007,6 +941,10 @@ class CampaignActivity(CTCTRemoteModel):
     verbose_name=_('Current Status'),
   )
 
+  # Nullify some parent fields
+  created_at = None
+  updated_at = None
+
   # Must be set to 5 on outgoing requests,
   # but imports could have other values
   format_type = models.IntegerField(
@@ -1075,31 +1013,3 @@ class CampaignActivity(CTCTRemoteModel):
   @classmethod
   def clean_remote_contact_lists(cls, data: dict) -> list[str]:
     return data.pop('contact_list_ids', [])
-
-
-class CampaignActivityAndContactList(Model):
-  """Custom through model that uses CTCT API ids.
-
-  Notes
-  -----
-  In order to bulk import the ManyToMany relationship between CampaignActivity
-  and ContactList, we create instances of the associated ThroughModel using the
-  API ids of CampaignActivity and ContactList. However, Django currently does
-  not support setting `to_field` in the Django-created ThroughModel, so we must
-  create our own ThroughModel in order specify the `to_field` values for the
-  ForeignKeys.
-
-  """
-
-  is_through_model = True
-
-  campaignactivity = models.ForeignKey(
-    CampaignActivity,
-    on_delete=models.CASCADE,
-    #to_field='api_id',
-  )
-  contactlist = models.ForeignKey(
-    ContactList,
-    on_delete=models.CASCADE,
-    #to_field='api_id',
-  )
