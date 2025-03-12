@@ -30,6 +30,7 @@ coverage = "^7.6.12"
 factory-boy = "^3.3.3"
 requests-mock = "^1.12.1"
 flake8 = "^7.1.2"
+codecov = "^2.1.13"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"

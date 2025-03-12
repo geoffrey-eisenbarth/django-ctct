@@ -1,5 +1,7 @@
 # Constant Contact Integration for Django
 
+[![codecov](https://codecov.io/gh/geoffrey.eisenbarth/django-ctct/branch/main/graph/badge.svg)](https://codecov.io/gh/geoffrey.eisenbarth/django-ctct)
+
 This Django app provides a seamless interface to the Constant Contact API, allowing you to manage contacts, email campaigns, and other Constant Contact functionalities directly from your Django project.
 
 **Warning:** This package is under active development. While it is our intention to develop with a consistent API going forward, we will not make promises until a later version is released.

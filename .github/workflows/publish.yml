@@ -27,13 +27,20 @@ jobs:
           pip install poetry
           poetry install --with dev
 
+      - name: Lint with flake8
+        run: poetry run flake8 .
+
       - name: Run tests
         run: |
           poetry run coverage run tests/project/manage.py test
           poetry run coverage report -m
 
-      - name: Lint with flake8
-        run: poetry run flake8 .
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: .coverage.xml
+          name: codecov-django-ctct
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Build and publish to TestPyPI
         if: github.event_name == 'release' && github.ref == 'refs/tags/' + github.event.release.tag_name
