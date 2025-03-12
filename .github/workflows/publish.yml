@@ -43,7 +43,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Build and publish to TestPyPI
-        if: github.event_name == 'release' && github.ref == 'refs/tags/' + github.event.release.tag_name
+        if: github.event_name == 'release' && github.ref == format('refs/tags/{0}', github.event.release.tag_name)
         run: |
           poetry build
           poetry config repositories.testpypi https://test.pypi.org/legacy/
@@ -51,7 +51,7 @@ jobs:
           poetry publish -r testpypi
 
       - name: Publish to PyPI
-        if: github.event_name == 'release' && github.ref == 'refs/tags/' + github.event.release.tag_name
+        if: github.event_name == 'release' && github.ref == format('refs/tags/{0}', github.event.release.tag_name)
         run: |
           poetry config pypi-token.pypi ${{ secrets.PYPI_API_TOKEN }}
           poetry publish
