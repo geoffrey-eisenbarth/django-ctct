@@ -14,7 +14,6 @@ class CTCTConfig(AppConfig):
     'CTCT_REDIRECT_URI',
     'CTCT_FROM_NAME',
     'CTCT_FROM_EMAIL',
-    'CTCT_ENQUEUE_DEFAULT',
   ]
 
   def ready(self):
