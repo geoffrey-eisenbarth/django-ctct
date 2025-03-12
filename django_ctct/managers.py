@@ -504,6 +504,7 @@ class RemoteManager(BaseRemoteManager):
 
       # Data only contains two keys: '_links' and e.g. 'contacts' or 'lists'
       links = data.pop('_links', None)
+      data = next(iter(data.values()))
       objs.extend(map(self.deserialize, data))
 
       try:
