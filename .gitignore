@@ -2,8 +2,9 @@ __pycache__/
 *.py[cod]
 .*.sw*
 *.sqlite3
-migrations/
+poetry.lock
 local_settings.py
-tests/project/*.html
-tests/project/.coverage
-tests/project/htmlcov/*
+migrations/
+tests/**/*.html
+tests/**/.coverage
+tests/**/htmlcov/*
