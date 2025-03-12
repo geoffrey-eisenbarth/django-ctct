@@ -29,14 +29,7 @@ pytest-django = "^4.10.0"
 parameterized = "^0.9.0"
 coverage = "^7.6.12"
 factory-boy = "^3.3.3"
-
-# [tool.poetry]
-# name = "django-ctct"
-# version = "0.0.1.dev1"
-# description = "A Django interface for the Constant Contact API"
-# authors = [
-#     "Geoffrey Eisenbarth <geoffrey.eisenbarth@gmail.com>",
-# ]
+requests-mock = "^1.12.1"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
