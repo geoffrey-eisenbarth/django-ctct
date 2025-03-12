@@ -9,11 +9,11 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "django (>=3.2.0,<6.0.0)",     # was >=5.1.6
+    "django (>=3.2.0,<6.0.0)",
     "jwt (>=1.3.1,<2.0.0)",
-    "requests (>=2.32.3,<3.0.0)",  # was >=2.31.0
+    "requests (>=2.32.3,<3.0.0)",
     "ratelimit (>=2.2.1,<3.0.0)",
-    "pyjwt (>=2.10.1,<3.0.0)",      # was >=2.9.0
+    "pyjwt (>=2.10.1,<3.0.0)",
     "tqdm (>=4.67.1,<5.0.0)",
 ]
 
@@ -27,16 +27,16 @@ ipdb = "^0.13.13"
 pytest = "^8.3.4"
 pytest-django = "^4.10.0"
 parameterized = "^0.9.0"
-coverage = "^7.6.12"  # was ^7.4.4
+coverage = "^7.6.12"
 factory-boy = "^3.3.3"
 
-[tool.poetry]
-name = "django-ctct"
-version = "0.0.1.dev1"
-description = "A Django interface for the Constant Contact API"
-authors = [
-    "Geoffrey Eisenbarth <geoffrey.eisenbarth@gmail.com>",
-]
+# [tool.poetry]
+# name = "django-ctct"
+# version = "0.0.1.dev1"
+# description = "A Django interface for the Constant Contact API"
+# authors = [
+#     "Geoffrey Eisenbarth <geoffrey.eisenbarth@gmail.com>",
+# ]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
