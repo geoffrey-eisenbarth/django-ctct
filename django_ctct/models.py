@@ -423,6 +423,7 @@ class ContactNote(CTCTModel):
     settings.AUTH_USER_MODEL,
     on_delete=models.CASCADE,
     null=True,
+    related_name='notes',
     verbose_name=_('Author'),
   )
 
