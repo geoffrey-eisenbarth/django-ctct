@@ -86,14 +86,21 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
   * `CTCT_PREVIEW_RECIPIENTS` will default to `settings.MANAGERS` if not set.
   * `CTCT_PREVIEW_MESSAGE` will be blank by default.
 
+3) **Run Migrations:**
+```bash
+> ./manage.py makemigrations
+> ./manage.py migrate
+```
 
-## Usage
+4) **Create Authenticatin Token:**
 
 After the app has been installed and configured, you must generate your first auth token:
   * Open up the `CTCT_REDIRECT_URI` address in your browser
   * Use your ConstantContact credentials to log in
   * From this point forward `django-ctct` should use refresh tokens, so no need to manually log in again
 
+
+## Usage
 If you wish to import data from ConstantContact.com into your local database (recommended), then run the following:
 
 ```bash
@@ -108,20 +115,20 @@ If you wish to use the Django admin to interact with ConstantContact, you must e
 
 ## Testing
 
-To install dev dependencies and run the tests, see the following:
+To install dev dependencies:
 
 ```bash
 > git clone git@github.com:geoffrey-eisenbarth/django-ctct.git
 > cd django-ctct
+> python -m pip install --upgrade pip
+> pip intall poetry
 > poetry install --with dev
-> cd tests/project
-> poetry run ./manage.py migrate
-> poetry run ./manage.py runserer`
 ```
-Visit `127.0.0.1:8000/ctct/auth/` and log into CTCT to set up your first Token
+
+To run tests:
 
 ```bash
-> poetry run coverage run ./manage.py test
+> poetry run coverage run tests/project/manage.py test
 > poetry run coverage report
 ```
 
