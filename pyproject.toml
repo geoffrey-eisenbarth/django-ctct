@@ -30,6 +30,14 @@ parameterized = "^0.9.0"
 coverage = "^7.4.4"  # was ^7.6.12
 factory-boy = "^3.3.3"
 
+[tool.poetry]
+name = "django-ctct"
+version = "0.0.1.dev1"
+description = "A Django interface for the Constant Contact API"
+authors = [
+    "Geoffrey Eisenbarth <geoffrey.eisenbarth@gmail.com>",
+]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
 
