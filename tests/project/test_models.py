@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from django_ctct.models import (
   CTCTModel, CustomField, ContactList, Contact,
-  EmailCampaign, CampaignActivity,
+  EmailCampaign,
 )
 
 from django_ctct.signals import (
@@ -134,7 +134,10 @@ class ModelTest(TestCase):
           ))
           for field_name in response_value.keys():
             if not (field_name.endswith('_id') or field_name.endswith('_at')):
-              self.assertEqual(getattr(related_obj, field_name), response_value[field_name])
+              self.assertEqual(
+                getattr(related_obj, field_name),
+                response_value[field_name]
+              )
 
       elif obj_value := getattr(self.existing_obj, field_name, None):
         self.assertEqual(obj_value, response_value)

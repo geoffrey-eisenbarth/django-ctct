@@ -1,14 +1,8 @@
-import datetime as dt
-import uuid
-
 import factory
 import factory.fuzzy
 from factory.django import DjangoModelFactory
 
-from django.utils import timezone
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.utils import formats
 
 from django_ctct import models as ctct_models
 from django_ctct.managers import TokenRemoteManager
@@ -193,4 +187,3 @@ class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
     factory_related_name='campaign',
     size=1,
   )
-

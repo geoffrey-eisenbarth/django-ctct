@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections import defaultdict
 import logging
 from functools import partial
-from typing import TYPE_CHECKING, Optional, NoReturn
+from typing import TYPE_CHECKING, Literal, Optional, NoReturn
 from urllib.parse import urlencode
 
 from jwt import ExpiredSignatureError
@@ -341,7 +340,7 @@ class RemoteManager(BaseRemoteManager):
 
     # Set related objects
     data = self.deserialize_related_obj_fields(data, parent_pk=pk)
-    data, related_objs = self.deserialize_related_objs_fields(data, parent_pk=pk)
+    data, related_objs = self.deserialize_related_objs_fields(data, parent_pk=pk)  # noqa: E501
 
     # Restrict to the fields defined in the Django object
     # NOTE: We prefer `field.attname` over `field.name` in order to pick up
@@ -423,7 +422,7 @@ class RemoteManager(BaseRemoteManager):
     """Honor the API's rate limit."""
     pass
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def create(self, obj: Model) -> Model:
     """Creates an existing Django object on the remote server.
 
@@ -513,7 +512,7 @@ class RemoteManager(BaseRemoteManager):
 
     return objs
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def update(self, obj: Model) -> Model:
     """Updates an existing Django object on the remote server.
 
@@ -546,7 +545,7 @@ class RemoteManager(BaseRemoteManager):
 
     return obj
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def delete(
     self,
     obj: Model,
@@ -587,8 +586,9 @@ class RemoteManager(BaseRemoteManager):
         'CustomField': '/activities/custom_fields_delete',
       }[self.model.__name__]
     except KeyError:
+      name = self.model.__name__
       message = _(
-        f"ConstantContact's API does not support bulk deletion of {self.model.__name__}."
+        f"ConstantContact does not support bulk deletion of {name}."
       )
       raise NotImplementedError(message)
 
@@ -626,7 +626,7 @@ class ContactListRemoteManager(RemoteManager):
     'name': 255,
   }
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def add_list_memberships(
     self,
     contact_list: Optional[ContactList] = None,
@@ -743,7 +743,7 @@ class ContactRemoteManager(RemoteManager):
         raise e
     return response
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def update(self, obj: Contact) -> Optional[Contact]:
     """Update Contact and ContactList membership on CTCT servers.
 
@@ -784,7 +784,7 @@ class ContactRemoteManager(RemoteManager):
 
     """
 
-    if not (pk := obj.pk):
+    if not obj.pk:
       raise ValueError('Must create object locally first.')
 
     # This endpoint expects a slightly different serialization
@@ -815,7 +815,6 @@ class ContactNoteRemoteManager(RemoteManager):
   API_ID_LABEL = 'note_id'
   API_EDITABLE_FIELDS = (
     'content',
-    #'created_at',  # Editable field, but set by Django db with auto_now
   )
   API_MAX_LENGTH = {
     'content': 2000,
@@ -900,7 +899,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     else:
       return super().serialize(obj)
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def create(self, obj: EmailCampaign) -> EmailCampaign:
     """Creates a local EmailCampaign on the remote servers.
 
@@ -959,15 +958,15 @@ class EmailCampaignRemoteManager(RemoteManager):
 
     return obj
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def update(self, obj: EmailCampaign) -> EmailCampaign:
     """Update EmailCampaign on remote servers.
 
     Notes
     -----
     The only field that can be (remotely) updated this way is the `name` field.
-    In order to update `scheduled_datetime` on remote servers or send a preview,
-    the `primary_email` CampaignActivity must be updated remotely.
+    In order to change when the campaign is scheduled to be sent or send a
+    preview, the `primary_email` CampaignActivity must be updated remotely.
 
     """
     if not (pk := obj.pk):
@@ -1031,7 +1030,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     ]),
   }
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def create(self, obj: CampaignActivity) -> NoReturn:
     message = _(
       "ConstantContact API does not support creating CampaignActivities. "
@@ -1039,7 +1038,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     raise NotImplementedError(message)
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def update(self, obj: Model) -> Model:
     """Update CampaignActivity on remote servers.
 
@@ -1072,7 +1071,7 @@ class CampaignActivityRemoteManager(RemoteManager):
 
     return obj
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def send_preview(
     self,
     obj: CampaignActivity,
@@ -1098,7 +1097,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     self.raise_or_json(response)
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def schedule(self, obj: CampaignActivity) -> None:
     """Schedules the `primary_email` CampaignActivity.
 
@@ -1136,7 +1135,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     )
     self.raise_or_json(response)
 
-  #@task(queue_name='ctct')
+  # @task(queue_name='ctct')
   def unschedule(self, obj: CampaignActivity) -> None:
     """Unschedules the `primary_email` CampaignActivity."""
     if obj.role == 'primary_email':

@@ -3,27 +3,34 @@ from unittest.mock import patch, MagicMock
 import uuid
 
 import factory
-from parameterized import parameterized, parameterized_class
+from parameterized import parameterized_class
 import requests_mock
 
 from django.db import models
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.forms import model_to_dict
-from django.http import HttpRequest
 from django.test import TestCase, Client, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from django_ctct.models import (
-  CTCTModel, Token, CustomField, ContactList, Contact, ContactNote,
+  CTCTModel, Token, CustomField,
+  ContactList, Contact, ContactNote,
+  EmailCampaign,
 )
-from django_ctct.admin import *
+from django_ctct.admin import (
+  ContactPhoneNumberInline,
+  ContactStreetAddressInline,
+  ContactNoteInline,
+)
+
 
 from tests.factories import get_factory, TokenFactory
 
 
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
 
 # TODO: How to do inline customfield checking?
 @parameterized_class(
@@ -87,7 +94,7 @@ class ModelAdminTest(TestCase):
 
     # Primary form data
     obj_data = model_to_dict(obj, fields=self.model.remote.API_EDITABLE_FIELDS)
-    obj_data = {k:v for k, v in obj_data.items() if v}
+    obj_data = {k: v for k, v in obj_data.items() if v}
 
     # Convert ManyToMany objects to pks
     if obj.pk:
@@ -171,13 +178,6 @@ class ModelAdminTest(TestCase):
     # TODO?
     if inline_data:
       pass
-      #breakpoint()
-    #for inline_admin in self.get_inline_admins():
-    #  related_model = inline_admin.model
-    #  for data in self.get_object_data(method='POST', model=related_model, get_multiple=True):
-    #    self.assertTrue(
-    #      related_model.objects.filter(**data).exists()
-    #    )
 
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
@@ -198,7 +198,10 @@ class ModelAdminTest(TestCase):
 
     # Update some values
     other_obj = self.factory.build()
-    other_obj_data = self.model.remote.serialize(other_obj, field_types='editable')
+    other_obj_data = self.model.remote.serialize(
+      obj=other_obj,
+      field_types='editable',
+    )
     for field_name, value in other_obj_data.copy().items():
       if value and hasattr(self.existing_obj, field_name):
         setattr(self.existing_obj, field_name, value)
@@ -271,15 +274,15 @@ class ModelAdminTest(TestCase):
     )
 
     # Verify remote deletion
-    # TODO: Is this considered "testing the API" and we should assume that it got deleted?
-    #self.mock_api.mock(
-    #  model=self.model,
-    #  method='GET',
-    #  status_code=404,
-    #  api_id=self.existing_obj.api_id,
-    #)
-    #remote_obj, _ = self.model.remote.get(self.existing_obj.api_id)
-    #self.assertIsNone(remote_obj)
+    # TODO: Is this considered "testing the API"?
+    # self.mock_api.mock(
+    #   model=self.model,
+    #   method='GET',
+    #   status_code=404,
+    #   api_id=self.existing_obj.api_id,
+    # )
+    # remote_obj, _ = self.model.remote.get(self.existing_obj.api_id)
+    # self.assertIsNone(remote_obj)
 
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
@@ -299,7 +302,9 @@ class ViewModelAdminTest(TestCase):
     self.client.force_login(self.user)
 
   def test_permissions(self):
-    admin_changelist_path = reverse(f'admin:django_ctct_{self.model.__name__.lower()}_changelist')
+    admin_changelist_path = reverse(
+      f'admin:django_ctct_{self.model.__name__.lower()}_changelist'
+    )
     self.response = self.client.get(admin_changelist_path)
     request = self.response.wsgi_request
 

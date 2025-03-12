@@ -152,7 +152,11 @@ class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
   def save_remotely(self, request, form, formsets, change):
     if self.remote_sync:
       # Remote save the primary object after related objects have been saved
-      remote_save(sender=self.model, instance=form.instance, created=not change)
+      remote_save(
+        sender=self.model,
+        instance=form.instance,
+        created=not change,
+      )
 
 
 class ContactListForm(forms.ModelForm):
@@ -473,7 +477,9 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     else:
       fieldsets = (
         (None, {
-          'fields': ('name', 'current_status', 'scheduled_datetime', 'send_preview'),
+          'fields': (
+            'name', 'current_status', 'scheduled_datetime', 'send_preview'
+          ),
         }),
       )
 
@@ -497,16 +503,20 @@ class EmailCampaignAdmin(RemoteModelAdmin):
       campaign_updated = change and ('name' in form.changed_data)
       if campaign_created or campaign_updated:
         # The only EmailCampaign field that can be updated is 'name'
-        remote_save(sender=self.model, instance=campaign, created=campaign_created)
+        remote_save(
+          sender=self.model,
+          instance=campaign,
+          created=campaign_created,
+        )
 
       # Handle remote saving the primary_email CampaignActivity
-      inline_changed = bool(formsets[0][0].changed_data) and not campaign_created
+      inline_changed = formsets[0][0].changed_data and not campaign_created
       schedule_changed = ('scheduled_datetime' in form.changed_data)
-      preview_sent = ('send_preview' in form.changed_data) and campaign.send_preview
+      preview_sent = ('send_preview' in form.changed_data) and campaign.send_preview  # noqa: E501
       recipients_changed = ('contact_lists' in formsets[0][0].changed_data)
 
       if (
-        inline_changed or schedule_changed or preview_sent or recipients_changed
+        inline_changed or schedule_changed or preview_sent or recipients_changed  # noqa: E501
       ):
         # Refresh to get API id and remote save
         activity.refresh_from_db()
