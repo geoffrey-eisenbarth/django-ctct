@@ -3,8 +3,8 @@ __pycache__/
 .*.sw*
 *.sqlite3
 poetry.lock
-local_settings.py
-migrations/
+django_ctct/migrations/
 tests/**/*.html
 tests/**/.coverage
-tests/**/htmlcov/*
+tests/**/htmlcov/
+tests/**/local_settings.py
