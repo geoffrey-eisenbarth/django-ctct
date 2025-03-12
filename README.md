@@ -104,7 +104,7 @@ After the app has been installed and configured, you must generate your first au
 If you wish to import data from ConstantContact.com into your local database (recommended), then run the following:
 
 ```bash
-> ./manage.py import_ctct`
+> ./manage.py import_ctct
 ```
 
 You will be asked before each model type is imported. **Note** ConstantContact does not provide a bulk API endpoint for fetching Campaign Activities, so depending on the size of your account, this might take some time and possible put you over their 10,000 request per day limit if you run it regularly.
@@ -134,7 +134,7 @@ To run tests:
 
 ## Contributing
 
-Once version 0.1.0 is released on PyPI, we hope to implement the following new features (in no particular order):
+Once version 0.0.1 is released on PyPI, we hope to implement the following new features (in no particular order):
 
   * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc). This will be controlled by the `CTCT_SYNC_SIGNALS` setting. **Update** This probably won't work as desired since the primary object will be saved before related objects are.
   * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
