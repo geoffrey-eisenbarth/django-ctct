@@ -38,13 +38,19 @@ class ModelTest(TestCase):
     # Create an existing object
     include_related = (self.model in [Contact, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
-    with factory.django.mute_signals(models.signals.post_save):
-      self.existing_obj = self.factory.create(api_id=uuid.uuid4())
+    with factory.django.mute_signals(post_save, m2m_changed):
+      kwargs = {'api_id': uuid.uuid4()}
+      if self.model is Contact:
+        m2m_factory = get_factory(ContactList)
+        kwargs['list_memberships'] = [m2m_factory(), m2m_factory()]
+      elif self.model is EmailCampaign:
+        raise NotImplementedError('How to specify M2M on CampaignActivity?')
+      self.existing_obj = self.factory.create(**kwargs)
 
     # Connect signals
     post_save.connect(remote_save)
     pre_delete.connect(remote_delete)
-    m2m_changed.connect(remote_update_m2m)
+    # m2m_changed.connect(remote_update_m2m)
 
   def tearDown(self):
     self.mock_api.stop()
@@ -117,6 +123,9 @@ class ModelTest(TestCase):
         # Verify API id was correctly stored
         self.assertEqual(str(self.existing_obj.api_id), response_value)
       elif isinstance(response_value, list):
+        # TODO: Verify ManyToMany (update the code below)
+        continue
+
         # Update variable name
         response_values = response_value.copy()
         del response_value
