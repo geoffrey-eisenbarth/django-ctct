@@ -125,6 +125,9 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Django-CTCT settings
+CTCT_PUBLIC_KEY = "THIS-IS-NOT-A-REAL-PUBLIC-KEY"
+CTCT_PRIVATE_KEY = "THIS-IS-NOT-A-REAL-PRIVATE-KEY"
+CTCT_REDIRECT_URI = 'http://127.0.0.1:8000/django-ctct/auth/'
 CTCT_FROM_NAME = "Django CTCT"
 CTCT_FROM_EMAIL = "django@ctct.com"
 CTCT_USE_ADMIN = True
