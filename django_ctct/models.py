@@ -446,7 +446,7 @@ class ContactNote(CTCTModel):
     # constraints = [
     #   models.CheckConstraint(
     #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NOTES),
-    #     name='limit_notes'
+    #     name='django_ctct_limit_notes'
     #   ),
     # ]
 
@@ -494,12 +494,12 @@ class ContactPhoneNumber(CTCTModel):
       # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
-      #   name='unique_phone_number',
+      #   name='django_ctct_unique_phone_number',
       # ),
       # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
-      #   name='limit_phone_numbers',
+      #   name='django_ctct_limit_phone_numbers',
       # ),
     ]
 
@@ -577,12 +577,12 @@ class ContactStreetAddress(CTCTModel):
       # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
-      #   name='unique_street_address',
+      #   name='django_ctct_unique_street_address',
       # ),
       # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
-      #   name='limit_street_addresses',
+      #   name='django_ctct_limit_street_addresses',
       # ),
     ]
 
@@ -656,12 +656,12 @@ class ContactCustomField(CTCTModel):
       # TODO PUSH: UniqueConstraint not enforced by CTCT?
       # models.UniqueConstraint(
       #   fields=['contact', 'custom_field'],
-      #   name='unique_custom_field',
+      #   name='django_ctct_unique_custom_field',
       # ),
       # TODO PUSH: CheckConstraint
       # models.CheckConstraint(
       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
-      #   name='limit_custom_fields',
+      #   name='django_ctct_limit_custom_fields',
       # ),
     ]
 
@@ -941,7 +941,7 @@ class CampaignActivity(CTCTRemoteModel):
     constraints = [
       models.UniqueConstraint(
         fields=['campaign', 'role'],
-        name='unique_campaign_activity',
+        name='django_ctct_unique_campaign_activity',
       ),
     ]
 
