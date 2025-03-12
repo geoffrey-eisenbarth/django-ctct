@@ -820,7 +820,7 @@ class EmailCampaign(CTCTRemoteModel):
     return current_status
 
   @classmethod
-  def clean_remote_scheduled_datetime(cls, data: dict) -> dt.datetime | None:
+  def clean_remote_scheduled_datetime(cls, data: dict) -> Optional[dt.datetime]:
     if scheduled_datetime := data.get('last_sent_date'):
       # Not sure why this ts_format is different
       return to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')
