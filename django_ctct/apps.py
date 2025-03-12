@@ -2,11 +2,12 @@ from django.apps import AppConfig
 from django.db.models.signals import post_save, m2m_changed, pre_delete
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.translation import gettext_lazy as _
 
 
 class CTCTConfig(AppConfig):
   name = 'django_ctct'
-  verbose_name = 'Constant Contact'
+  verbose_name = _('Constant Contact')
   ctct_settings = [
     'CTCT_PUBLIC_KEY',
     'CTCT_SECRET_KEY',
@@ -20,7 +21,7 @@ class CTCTConfig(AppConfig):
     # Validate that necessary settings have been defined
     for value in self.ctct_settings:
       if not hasattr(settings, value):
-        message = (
+        message = _(
           f"[django-ctct] {value} must be defined in settings.py."
         )
         raise ImproperlyConfigured(message)

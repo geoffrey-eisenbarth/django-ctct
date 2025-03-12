@@ -780,18 +780,6 @@ class EmailCampaign(CTCTRemoteModel):
   def __str__(self) -> str:
     return self.name
 
-  def clean(self):
-    """Validate scheduled_datetime."""
-    if (
-      (self.current_status != 'DONE') and
-      (self.scheduled_datetime is not None) and
-      (self.scheduled_datetime < timezone.now() + dt.timedelta(minutes=30))
-    ):
-      message = (
-        "Must schedule the campaign for at least 30 minutes in the future."
-      )
-      raise ValidationError(message)
-
   @classmethod
   def clean_remote_sends(cls, data: dict) -> int:
     return cls.clean_remote_counts('sends', data)

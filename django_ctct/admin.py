@@ -535,7 +535,7 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     else:
       preview = ""
 
-    msg = format_html(
+    message = format_html(
       _("The {name} “{obj}” has been {action}{preview}."),
       **{
         'name': campaign._meta.verbose_name,
@@ -544,7 +544,7 @@ class EmailCampaignAdmin(RemoteModelAdmin):
         'preview': preview,
       },
     )
-    self.message_user(request, msg)
+    self.message_user(request, message)
 
 
 if getattr(settings, 'CTCT_USE_ADMIN', False):
