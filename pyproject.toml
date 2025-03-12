@@ -1,13 +1,13 @@
 [project]
 name = "django-ctct"
-version = "0.1.0"
+version = "0.0.1.dev1"
 description = "A Django interface for the Constant Contact API"
 authors = [
     {name = "Geoffrey Eisenbarth",email = "geoffrey.eisenbarth@gmail.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "django (>=5.1.6,<6.0.0)",
     "jwt (>=1.3.1,<2.0.0)",
