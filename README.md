@@ -14,10 +14,11 @@ pip install django-ctct
 
 1) **Add to `INSTALLED_APPS`:**
 
-In your Django project's settings.py file, add django_ctct to the INSTALLED_APPS list:
+In your Django project's settings.py file, add `'django_ctct'` to the `'INSTALLED_APPS'`list (order doesn't matter):
 
 ```python
 INSTALLED_APPS = [
+  # ... django apps
   'django_ctct',
   # ... other apps
 ]
