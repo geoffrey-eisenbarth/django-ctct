@@ -5,7 +5,6 @@ import factory
 from parameterized import parameterized_class
 import requests_mock
 
-from django.db import models
 from django.db.models.signals import post_save, m2m_changed, pre_delete
 from django.test import TestCase
 from django.utils import timezone
@@ -50,7 +49,7 @@ class ModelTest(TestCase):
     # Connect signals
     post_save.connect(remote_save)
     pre_delete.connect(remote_delete)
-    # m2m_changed.connect(remote_update_m2m)
+    m2m_changed.connect(remote_update_m2m)
 
   def tearDown(self):
     self.mock_api.stop()
