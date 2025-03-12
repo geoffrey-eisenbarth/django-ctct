@@ -22,7 +22,8 @@ from django.middleware.csrf import get_token as get_csrf_token
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from django_ctct.utils import get_related_fields, mute_signals
+from django_ctct.utils import get_related_fields
+from django_ctct.vendor import mute_signals
 
 
 if TYPE_CHECKING:

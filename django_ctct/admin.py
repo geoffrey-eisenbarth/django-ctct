@@ -22,7 +22,7 @@ from django_ctct.models import (
   EmailCampaign, CampaignActivity
 )
 from django_ctct.signals import remote_save, remote_delete
-from django_ctct.utils import mute_signals
+from django_ctct.vendor import mute_signals
 
 
 def catch_api_errors(func):
