@@ -1,15 +1,14 @@
 from argparse import ArgumentParser
-from collections import defaultdict
-from operator import attrgetter
-from typing import Optional
+from typing import Optional, Type
 
 from tqdm import tqdm
 
+import django
 from django.core.management.base import BaseCommand
 
 from django_ctct.models import (
-  CTCTModel, CustomField,
-  ContactList, Contact,
+  CTCTModel, ContactList, CustomField,
+  Contact, ContactCustomField,
   EmailCampaign, CampaignActivity,
 )
 
@@ -40,10 +39,19 @@ class Command(BaseCommand):
     CampaignActivity,
   ]
 
+  def get_id_to_pk(self, model: Type[CTCTModel]) -> dict:
+    """Returns a dictionary to convert CTCT API ids to Django pks."""
+    id_to_pk = {
+      str(api_id): int(pk)
+      for (api_id, pk) in model.objects.values_list('api_id', 'pk')
+    }
+    return id_to_pk
+
   def upsert(
     self,
     model: CTCTModel,
     objs: list[CTCTModel],
+    update_conflicts: bool = True,
     unique_fields: list[str] = ['api_id'],
     update_fields: Optional[list[str]] = None,
     silent: bool = False,
@@ -51,26 +59,29 @@ class Command(BaseCommand):
 
     verb = 'Imported' if (update_fields is None) else 'Updated'
 
-    # TODO: is_through_model depreciated
-    if getattr(model, 'is_through_model', False):
-      breakpoint()
-      model.objects.all().delete()
-      objs = model.objects.bulk_create(objs)
-    else:
-      # Perform upsert using `bulk_create()`
-      if update_fields is None:
-        update_fields = [
-          f.name
-          for f in model._meta.fields
-          if not f.primary_key and (f.name != 'api_id')
-        ]
+    # Perform upsert using `bulk_create()`
+    if model._meta.auto_created or (model is ContactCustomField):
+      # TODO: Should we delete existing through model instances?
+      update_conflicts = False
+      unique_fields = update_fields = None
+    elif update_fields is None:
+      update_fields = [
+        f.name
+        for f in model._meta.fields
+        if not f.primary_key and (f.name != 'api_id')
+      ]
 
-      objs = model.objects.bulk_create(
-        objs=objs,
-        update_conflicts=True,
-        unique_fields=unique_fields,
-        update_fields=update_fields,
-      )
+    objs_w_pks = model.objects.bulk_create(
+      objs=objs,
+      update_conflicts=update_conflicts,
+      unique_fields=unique_fields,
+      update_fields=update_fields,
+    )
+    if update_conflicts and (django.get_version() < '5.0'):
+      # In older versions, enabling the update_conflicts parameter prevented
+      # setting the primary key on each model instance.
+      id_to_pk = self.get_id_to_pk(model)
+      [setattr(o, 'pk', id_to_pk[o.api_id]) for o in objs_w_pks]
 
     # Inform the user
     if not silent:
@@ -79,12 +90,40 @@ class Command(BaseCommand):
       )
       self.stdout.write(message)
 
-    return objs
+    return objs_w_pks
+
+  def set_related_object_pks(
+    self,
+    model: Type[CTCTModel],
+    obj_w_pk: CTCTModel,
+    related_model: Type[CTCTModel],
+    instances: list[CTCTModel],
+  ) -> None:
+    """Sets pk values for various related object."""
+    for field in related_model._meta.get_fields():
+      if field.remote_field:
+        if field.name == 'author':
+          # CTCT doesn't store Author info
+          continue
+        if field.many_to_many and (instances[0].pk is None):
+          # Can't save ManyToMany until parent object has pk
+          continue
+        elif field.remote_field.model is model:
+          # No need to hit the db, we know the pk is obj_w_pk.pk
+          converter = lambda _: obj_w_pk.pk
+        else:
+          # Convert API id to Django pk (hits db)
+          id_to_pk = self.get_id_to_pk(field.remote_field.model)
+          converter = lambda o: id_to_pk[getattr(o, field.attname)]
+
+        # Set pks on related objects
+        [setattr(o, field.attname, converter(o)) for o in instances]
 
   def import_model(self, model: CTCTModel) -> None:
     """Imports objects from CTCT into Django's database."""
 
     if model is CampaignActivity:
+      # CampaignActivities do not have a bulk API endpoint
       return self.import_campaign_activities()
 
     model.remote.connect()
@@ -97,62 +136,42 @@ class Command(BaseCommand):
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
 
-    for obj, related_objs in zip(objs_w_pks, related_objs):
-      for related_model, objs in related_objs.items():
+    for obj_w_pk, related_objs in zip(objs_w_pks, related_objs):
+      for related_model, instances in related_objs.items():
+        self.set_related_object_pks(model, obj_w_pk, related_model, instances)
 
-        # TODO:
-        if related_model.__name__ == 'Contact_list_memberships':
-          continue
-
-        # Set the parent object pk
-        for field in related_model._meta.get_fields():
-          if getattr(field.remote_field, 'model', None) is model:
-            [setattr(o, field.attname, obj.pk) for o in objs]
-
-        # Upsert now that parent object pk has been set
-        objs = self.upsert(related_model, objs, silent=True)
+        # Upsert now that pks have been set
+        self.upsert(related_model, instances, silent=True)
 
   def import_campaign_activities(self) -> None:
-    """Imports CampaignActivities from CTCT into Django's database."""
+    """CampaignActivities must be imported one at a time."""
 
-    objs, related_objs = [], defaultdict(list)
+    model = CampaignActivity
 
-    EmailCampaign.remote.connect()
-    CampaignActivity.remote.connect()
+    objs_and_related_objs = []
 
-    # Use the EmailCampaign detail endpoint to get CampaignActivity api_ids
-    for campaign in tqdm(EmailCampaign.objects.exclude(api_id=None)):
-      _, _related_objs = EmailCampaign.remote.get(campaign.api_id)
+    model.remote.connect()
+    for activity in tqdm(model.objects.filter(role='primary_email')):
+      obj, related_objs = model.remote.get(activity.api_id)
+      obj.pk = activity.pk
+      obj.campaign_id = activity.campaign_id
 
-      # Now we use the CampaignActivity detail endpoint to get remaining fields
-      primary_emails = filter(
-        lambda obj: obj.role == 'primary_email',
-        _related_objs.get(CampaignActivity, [])
-      )
-      for api_id in map(attrgetter('api_id'), primary_emails):
-        obj, _related_objs = CampaignActivity.remote.get(api_id)
-        obj.campaign_id = campaign.pk
+      objs_and_related_objs.append((obj, related_objs))
 
-        # Store objects for later
-        # NOTE We updated `related_obj` with the values from `_related_objs`
-        for related_model, instances in _related_objs.items():
-          related_objs[related_model].extend(instances)
-        if obj is not None:
-          objs.append(obj)
-
-    # Upsert objects and related objects
-    objs = self.upsert(
-      model=CampaignActivity,
-      objs=objs,
+    # Upsert objects to update fields
+    self.upsert(
+      model=model,
+      objs=[_[0] for _ in objs_and_related_objs],
       unique_fields=['campaign_id', 'role'],
       update_fields=['role', 'subject', 'preheader', 'html_content']
     )
 
-    for related_model, objs in related_objs.items():
-      # TODO:
-      if related_model.__name__ == 'CampaignActivity_contact_lists':
-        continue
-      objs = self.upsert(related_model, objs)
+    for obj_w_pk, related_objs in objs_and_related_objs:
+      for related_model, instances in related_objs.items():
+        self.set_related_object_pks(model, obj_w_pk, related_model, instances)
+
+        # Upsert now that pks have been set
+        self.upsert(related_model, instances, silent=True)
 
   def import_campaign_stats(self) -> None:
     """"Imports EmailCampaign stats from CTCT into Django's database."""
@@ -171,7 +190,7 @@ class Command(BaseCommand):
       # No values returned
       return
     else:
-      objs = self.upsert(EmailCampaign, objs, update_fields=update_fields)
+      self.upsert(EmailCampaign, objs, update_fields=update_fields)
 
   def add_arguments(self, parser: ArgumentParser) -> None:
     """Allow optional keyword arguments."""
