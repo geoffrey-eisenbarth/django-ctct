@@ -226,6 +226,7 @@ class CustomField(CTCTRemoteModel):
   type = models.CharField(
     max_length=6,
     choices=TYPES,
+    default=TYPES[0][0],
     verbose_name=_('Type'),
     help_text=_(
       'Specifies the type of value the custom_field field accepts'
@@ -615,14 +616,12 @@ class ContactStreetAddress(CTCTModel):
     return cls.clean_remote_string('country', data)
 
 
-class ContactCustomField(CTCTModel):
+class ContactCustomField(models.Model):
   """Django implementation of a CTCT Contact's CustomField.
 
   Notes
   -----
-  It's important to specify `custom_field_id` in `API_EDITABLE_FIELDS` instead
-  of `custom_field`; using the latter will result in a serialized CustomField
-  instance when Contact is serialized.
+  CTCT does not provide UUIDs for these, so we do not inherit from CTCTModel.
 
   """
 
@@ -636,14 +635,13 @@ class ContactCustomField(CTCTModel):
     related_name='custom_fields',
     verbose_name=_('Contact'),
   )
-
-  # API editable fields
   custom_field = models.ForeignKey(
     CustomField,
     on_delete=models.CASCADE,
-    related_name='instances',
+    related_name='contacts',
     verbose_name=_('Field'),
   )
+
   value = models.CharField(
     max_length=remote.API_MAX_LENGTH['value'],
     verbose_name=_('Value'),
@@ -673,12 +671,7 @@ class ContactCustomField(CTCTModel):
       s = super().__str__()
     return s
 
-  @classmethod
-  def clean_remote_custom_field(cls, data: dict) -> str:
-    return data['custom_field_id']
 
-
-# TODO: EmailCampaign.current_status vs CampaignActivity.current_status
 class EmailCampaign(CTCTRemoteModel):
   """Django implementation of a CTCT EmailCampaign."""
 

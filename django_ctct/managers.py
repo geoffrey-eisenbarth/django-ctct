@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, NoReturn
 from urllib.parse import urlencode
+from uuid import UUID
 
 from jwt import ExpiredSignatureError
 from ratelimit import limits, sleep_and_retry
@@ -207,9 +209,6 @@ class RemoteManager(BaseRemoteManager):
   API_LIMIT_CALLS = 4   # four calls
   API_LIMIT_PERIOD = 1  # per second
 
-  API_ENDPOINT = ''
-  API_ID_LABEL = ''
-
   API_GET_QUERIES = {}
   API_EDITABLE_FIELDS = tuple()
   API_READONLY_FIELDS = (
@@ -249,27 +248,30 @@ class RemoteManager(BaseRemoteManager):
     }[field_types]
 
     for field_name in field_names:
+
+      if (value := getattr(obj, field_name, None)) is None:
+        # Don't include null values
+        continue
+      elif isinstance(value, UUID):
+        # Convert UUID to string
+        value = str(value)
+      elif isinstance(value, dt.datetime):
+        # Convert datetime to string
+        value = value.strftime(self.TS_FORMAT)
+
+      # The field determines how the value is serialized
       try:
         field = self.model._meta.get_field(field_name)
       except FieldDoesNotExist:
-        # Check if the API field was defined as a @property
-        if value := getattr(obj, field_name, None):
-          data[field_name] = value
+        # The API field was defined as a @property
+        data[field_name] = value
         continue
 
-      if field_name.endswith('_id'):
-        # Convert related object UUID to string
-        if (value := getattr(obj, field_name)) is not None:
-          value = str(value)
-        if field_name == 'api_id':
-          field_name = self.model.remote.API_ID_LABEL
-
-      elif isinstance(field, models.DateTimeField):
-        # Convert datetime to string
-        if (value := getattr(obj, field_name)) is not None:
-          value = value.strftime(self.TS_FORMAT)
-      elif not field.is_relation:
-        value = getattr(obj, field_name)
+      if field_name == 'api_id':
+        field_name = self.model.remote.API_ID_LABEL
+      elif field_name.endswith('_id'):
+        api_id = getattr(obj, field_name[:-3]).api_id
+        value = str(api_id)
       elif field.many_to_many:
         if obj.pk:
           qs = getattr(obj, field_name).values_list('api_id', flat=True)
@@ -318,19 +320,8 @@ class RemoteManager(BaseRemoteManager):
     else:
       data = data.copy()
 
-    try:
+    if hasattr(self, 'API_ID_LABEL'):
       data['api_id'] = data.pop(self.API_ID_LABEL)
-    except AttributeError:
-      message = _(
-        f"{self} is missing the `API_ID_LABEL` attribute."
-      )
-      raise ImproperlyConfigured(message)
-    except KeyError as e:
-      if self.API_ID_LABEL is None:
-        # e.g. ContactCustomField
-        pass
-      else:
-        raise e
 
     # Clean field values, must be done before field restriction
     model_fields = self.model._meta.get_fields()
@@ -377,9 +368,10 @@ class RemoteManager(BaseRemoteManager):
 
     """
 
-    otos, _, fks, _ = get_related_fields(self.model)
-    for field in filter(lambda f: f.attname in data, otos + fks):
-      data[field.attname] = parent_pk
+    if parent_pk:
+      otos, _, fks, _ = get_related_fields(self.model)
+      for field in filter(lambda f: f.attname in data, otos + fks):
+        data[field.attname] = parent_pk
     return data
 
   def deserialize_related_objs_fields(
@@ -502,7 +494,7 @@ class RemoteManager(BaseRemoteManager):
       )
       data = self.raise_or_json(response)
 
-      # Data only contains two keys: '_links' and e.g. 'contacts' or 'lists'
+      # Data only contains two keys: '_links' and e.g. 'lists' or 'contacts'
       links = data.pop('_links', None)
       data = next(iter(data.values()))
       objs.extend(map(self.deserialize, data))
@@ -857,7 +849,6 @@ class ContactStreetAddressRemoteManager(RemoteManager):
 class ContactCustomFieldRemoteManager(RemoteManager):
   """Extend RemoteManager to handle ContactCustomFields."""
 
-  API_ID_LABEL = 'custom_field_id'
   API_EDITABLE_FIELDS = (
     'custom_field_id',
     'value',
@@ -879,8 +870,17 @@ class EmailCampaignRemoteManager(RemoteManager):
   API_READONLY_FIELDS = (
     'api_id',
     'current_status',
+    'campaign_activities',
     'created_at',
     'updated_at',
+    'sends',
+    'opens',
+    'clicks',
+    'forwards',
+    'optouts',
+    'abuse',
+    'bounces',
+    'not_opened',
     'sends',
     'opens',
     'clicks',
@@ -894,12 +894,22 @@ class EmailCampaignRemoteManager(RemoteManager):
     'name': 80,
   }
 
-  def serialize(self, obj: Model) -> dict:
-    if obj.api_id:
+  def serialize(
+    self,
+    obj: Model,
+    field_types: Literal['editable', 'readonly', 'all'] = 'editable',
+  ) -> dict:
+    if obj.api_id and (field_types == 'editable'):
       # The only field that the API will update
-      return {'name': obj.name}
+      data = {'name': obj.name}
     else:
-      return super().serialize(obj)
+      data = super().serialize(obj, field_types)
+      if data.get('sends') is not None:
+        data['unique_counts'] = {
+          stat_field: data.pop(stat_field)
+          for stat_field in self.API_READONLY_FIELDS[-16:]
+        }
+    return data
 
   # @task(queue_name='ctct')
   def create(self, obj: EmailCampaign) -> EmailCampaign:
@@ -1020,7 +1030,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     'from_email': 80,
     'reply_to_email': 80,
     'subject': 200,     # Not documented
-    'preheader': 130,   # Not documentred
+    'preheader': 130,   # Not documented  # TODO: Can it be bigger?
     'html_content': int(15e4),
   }
   API_GET_QUERIES = {

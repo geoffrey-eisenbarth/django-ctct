@@ -1,7 +1,7 @@
 from unittest.mock import patch, MagicMock
-import uuid
+from uuid import uuid4
 
-import factory
+from factory.django import mute_signals
 from parameterized import parameterized_class
 import requests_mock
 
@@ -37,8 +37,8 @@ class ModelTest(TestCase):
     # Create an existing object
     include_related = (self.model in [Contact, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
-    with factory.django.mute_signals(post_save, m2m_changed):
-      kwargs = {'api_id': uuid.uuid4()}
+    with mute_signals(post_save, m2m_changed):
+      kwargs = {}
       if self.model is Contact:
         m2m_factory = get_factory(ContactList)
         kwargs['list_memberships'] = [m2m_factory(), m2m_factory()]
@@ -65,11 +65,7 @@ class ModelTest(TestCase):
         data[field] = ts_now
 
     # Set API ID
-    if obj.api_id is None:
-      api_id = str(uuid.uuid4())
-    else:
-      api_id = str(obj.api_id)
-    data[self.model.remote.API_ID_LABEL] = api_id
+    data[self.model.remote.API_ID_LABEL] = str(obj.api_id or uuid4())
 
     return data
 
@@ -79,7 +75,7 @@ class ModelTest(TestCase):
     token_decode.return_value = True
 
     # Build the object using factory-boy
-    obj = self.factory.build()
+    obj = self.factory.build(api_id=None)
 
     # Set up API mocker
     self.mock_api.post(
@@ -89,7 +85,10 @@ class ModelTest(TestCase):
     )
 
     # Save the object, triggering post_save signal
-    obj.save()
+    try:
+      obj.save()
+    except:
+      breakpoint()
 
     # Verify API fields were added
     obj.refresh_from_db()
