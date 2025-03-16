@@ -26,6 +26,7 @@ def get_factory(
       ctct_models.ContactNote: ContactNoteFactory,
       ctct_models.ContactPhoneNumber: ContactPhoneNumberFactory,
       ctct_models.ContactStreetAddress: ContactStreetAddressFactory,
+      ctct_models.ContactCustomField: ContactCustomFieldFactory,
       ctct_models.EmailCampaign: EmailCampaignFactory,
       ctct_models.CampaignActivity: CampaignActivityFactory,
     }
@@ -36,7 +37,7 @@ class UserFactory(DjangoModelFactory):
   class Meta:
     model = get_user_model()
 
-  username = factory.Faker('user_name')
+  username = factory.Sequence(lambda n: f'user{n}')
   email = factory.Sequence(lambda n: f'user{n}@example.com')
   first_name = factory.Faker('first_name')
   last_name = factory.Faker('last_name')
@@ -52,7 +53,11 @@ class TokenFactory(DjangoModelFactory):
   scope = TokenRemoteManager.API_SCOPE
 
 
-class ContactListFactory(DjangoModelFactory):
+class CTCTModelFactory(DjangoModelFactory):
+  api_id = factory.Faker('uuid4')
+
+
+class ContactListFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.ContactList
 
@@ -61,7 +66,7 @@ class ContactListFactory(DjangoModelFactory):
   favorite = False
 
 
-class CustomFieldFactory(DjangoModelFactory):
+class CustomFieldFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.CustomField
 
@@ -69,7 +74,7 @@ class CustomFieldFactory(DjangoModelFactory):
   type = 'string'
 
 
-class ContactFactory(DjangoModelFactory):
+class ContactFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.Contact
 
@@ -80,21 +85,19 @@ class ContactFactory(DjangoModelFactory):
   company_name = factory.Faker('company')
 
 
-class ContactNoteFactory(DjangoModelFactory):
+class ContactNoteFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.ContactNote
 
-  api_id = factory.Faker('uuid4')
-  author = factory.SubFactory(UserFactory)
+  #author = factory.SubFactory(UserFactory)
   contact = factory.SubFactory(ContactFactory)
   content = factory.Faker('sentence')
 
 
-class ContactPhoneNumberFactory(DjangoModelFactory):
+class ContactPhoneNumberFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.ContactPhoneNumber
 
-  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
     _[0] for _ in ctct_models.ContactPhoneNumber.KINDS
@@ -102,11 +105,10 @@ class ContactPhoneNumberFactory(DjangoModelFactory):
   phone_number = factory.Faker('phone_number')
 
 
-class ContactStreetAddressFactory(DjangoModelFactory):
+class ContactStreetAddressFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.ContactStreetAddress
 
-  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
     _[0] for _ in ctct_models.ContactStreetAddress.KINDS
@@ -122,7 +124,6 @@ class ContactCustomFieldFactory(DjangoModelFactory):
   class Meta:
     model = ctct_models.ContactCustomField
 
-  api_id = factory.Faker('uuid4')
   contact = factory.SubFactory(ContactFactory)
   custom_field = factory.SubFactory(CustomFieldFactory)
   value = factory.Faker('word')
@@ -146,23 +147,26 @@ class ContactWithRelatedObjsFactory(ContactFactory):
   )
 
   @factory.post_generation
+  def custom_fields(self, create, extracted, **kwargs):
+    if not create or not extracted:
+      return
+    self.custom_fields.add(*extracted)
+
+  @factory.post_generation
   def list_memberships(self, create, extracted, **kwargs):
     if not create or not extracted:
-      # Simple build, or nothing to add, do nothing.
       return
-
-    # Add the iterable of ContactLists using bulk addition
     self.list_memberships.add(*extracted)
 
 
-class EmailCampaignFactory(DjangoModelFactory):
+class EmailCampaignFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.EmailCampaign
 
   name = factory.Sequence(lambda n: f'Email Campaign {n}')
 
 
-class CampaignActivityFactory(DjangoModelFactory):
+class CampaignActivityFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.CampaignActivity
 
