@@ -31,9 +31,16 @@ factory-boy = "^3.3.3"
 requests-mock = "^1.12.1"
 flake8 = "^7.1.2"
 codecov = "^2.1.13"
+mypy = "^1.15.0"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
 
 [tool.coverage.report]
 show_missing = true
+
+# [tool.mypy]
+# python_version = 3.9
+# django_any_from_any = true
+# plugins = mypy_django_plugin.*
+# ignore_missing_imports = true
