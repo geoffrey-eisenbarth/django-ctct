@@ -17,8 +17,8 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
-  Token, CTCTRemoteModel, ContactList,
-  Contact, CustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
+  Token, CTCTRemoteModel, ContactList, CustomField,
+  Contact, ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity
 )
 from django_ctct.signals import remote_save, remote_delete
@@ -258,6 +258,14 @@ class ContactNoteInline(admin.TabularInline):
     return False
 
 
+class ContactCustomFieldInline(admin.TabularInline):
+
+  model = ContactCustomField
+  excldue = ('api_id', )
+
+  extra = 1
+
+
 class ContactAdmin(RemoteModelAdmin):
   """Admin functionality for CTCT Contacts."""
 
@@ -317,6 +325,7 @@ class ContactAdmin(RemoteModelAdmin):
   )
   filter_horizontal = ('list_memberships', )
   inlines = (
+    ContactCustomFieldInline,
     ContactPhoneNumberInline,
     ContactStreetAddressInline,
     ContactNoteInline,
