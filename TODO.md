@@ -1,3 +1,4 @@
+* Implement mypy
 * models
   * EmailCampaign.current_status vs CampaignActivity.current_status
 * testing
