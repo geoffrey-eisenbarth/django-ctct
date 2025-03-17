@@ -19,7 +19,8 @@ from django_ctct.managers import (
   ContactRemoteManager, ContactNoteRemoteManager,
   ContactPhoneNumberRemoteManager, ContactStreetAddressRemoteManager,
   ContactCustomFieldRemoteManager,
-  EmailCampaignRemoteManager, CampaignActivityRemoteManager,
+  EmailCampaignRemoteManager,
+  CampaignActivityRemoteManager, CampaignSummaryRemoteManager,
 )
 
 
@@ -110,10 +111,6 @@ class CTCTModel(Model):
 
   class Meta:
     abstract = True
-
-  @classmethod
-  def clean_remote_counts(cls, field_name: str, data: dict) -> int:
-    return data.get('unique_counts', {}).get(field_name, 0)
 
   @classmethod
   def clean_remote_string(cls, field_name: str, data: dict) -> str:
@@ -715,54 +712,6 @@ class EmailCampaign(CTCTRemoteModel):
     default='DRAFT',
     verbose_name=_('Current Status'),
   )
-  sends = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Sends'),
-    help_text=_('The total number of unique sends'),
-  )
-  opens = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Opens'),
-    help_text=_('The total number of unique opens'),
-  )
-  clicks = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Clicks'),
-    help_text=_('The total number of unique clicks'),
-  )
-  forwards = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Forwards'),
-    help_text=_('The total number of unique forwards'),
-  )
-  optouts = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Opt Out'),
-    help_text=_('The total number of people who unsubscribed'),
-  )
-  abuse = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Spam'),
-    help_text=_('The total number of people who marked as spam'),
-  )
-  bounces = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Bounces'),
-    help_text=_('The total number of bounces'),
-  )
-  not_opened = models.IntegerField(
-    null=True,
-    default=None,
-    verbose_name=_('Not Opened'),
-    help_text=_('The total number of people who didn\'t open'),
-  )
 
   class Meta:
     verbose_name = _('Email Campaign')
@@ -772,46 +721,6 @@ class EmailCampaign(CTCTRemoteModel):
 
   def __str__(self) -> str:
     return self.name
-
-  @classmethod
-  def clean_remote_sends(cls, data: dict) -> int:
-    return cls.clean_remote_counts('sends', data)
-
-  @classmethod
-  def clean_remote_opens(cls, data: dict) -> int:
-    return cls.clean_remote_counts('opens', data)
-
-  @classmethod
-  def clean_remote_clicks(cls, data: dict) -> int:
-    return cls.clean_remote_counts('clicks', data)
-
-  @classmethod
-  def clean_remote_forwards(cls, data: dict) -> int:
-    return cls.clean_remote_counts('forwards', data)
-
-  @classmethod
-  def clean_remote_optouts(cls, data: dict) -> int:
-    return cls.clean_remote_counts('optouts', data)
-
-  @classmethod
-  def clean_remote_abuse(cls, data: dict) -> int:
-    return cls.clean_remote_counts('abuse', data)
-
-  @classmethod
-  def clean_remote_bounces(cls, data: dict) -> int:
-    return cls.clean_remote_counts('bounces', data)
-
-  @classmethod
-  def clean_remote_not_opened(cls, data: dict) -> int:
-    return cls.clean_remote_counts('not_opened', data)
-
-  @classmethod
-  def clean_remote_current_status(cls, data: dict) -> str:
-    if data.get('unique_counts'):
-      current_status = 'DONE'
-    else:
-      current_status = data.get('current_status')
-    return current_status
 
   @classmethod
   def clean_remote_scheduled_datetime(cls, data: dict) -> Optional[dt.datetime]:  # noqa: E501
@@ -988,3 +897,110 @@ class CampaignActivity(CTCTRemoteModel):
   @classmethod
   def clean_remote_contact_lists(cls, data: dict) -> list[str]:
     return data.pop('contact_list_ids', [])
+
+
+class CampaignSummary(models.Model):
+  """Django implementation of a CTCT EmailCampaign report."""
+
+  # Must explicitly specify both
+  objects = models.Manager()
+  remote = CampaignSummaryRemoteManager()
+
+  campaign = models.OneToOneField(
+    EmailCampaign,
+    on_delete=models.CASCADE,
+    related_name='summary',
+    verbose_name=_('Email Campaign'),
+  )
+
+  # API read-only fields
+  sends = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Sends'),
+    help_text=_('The total number of unique sends'),
+  )
+  opens = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Opens'),
+    help_text=_('The total number of unique opens'),
+  )
+  clicks = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Clicks'),
+    help_text=_('The total number of unique clicks'),
+  )
+  forwards = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Forwards'),
+    help_text=_('The total number of unique forwards'),
+  )
+  optouts = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Opt Out'),
+    help_text=_('The total number of people who unsubscribed'),
+  )
+  abuse = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Spam'),
+    help_text=_('The total number of people who marked as spam'),
+  )
+  bounces = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Bounces'),
+    help_text=_('The total number of bounces'),
+  )
+  not_opened = models.IntegerField(
+    null=True,
+    default=None,
+    verbose_name=_('Not Opened'),
+    help_text=_('The total number of people who didn\'t open'),
+  )
+
+  class Meta:
+    verbose_name = _('Email Campaign Report')
+    verbose_name_plural = _('Email Campaign Reports')
+
+    ordering = ('-campaign', )
+
+  @classmethod
+  def clean_remote_counts(cls, field_name: str, data: dict) -> int:
+    return data.get('unique_counts', {}).get(field_name, 0)
+
+  @classmethod
+  def clean_remote_sends(cls, data: dict) -> int:
+    return cls.clean_remote_counts('sends', data)
+
+  @classmethod
+  def clean_remote_opens(cls, data: dict) -> int:
+    return cls.clean_remote_counts('opens', data)
+
+  @classmethod
+  def clean_remote_clicks(cls, data: dict) -> int:
+    return cls.clean_remote_counts('clicks', data)
+
+  @classmethod
+  def clean_remote_forwards(cls, data: dict) -> int:
+    return cls.clean_remote_counts('forwards', data)
+
+  @classmethod
+  def clean_remote_optouts(cls, data: dict) -> int:
+    return cls.clean_remote_counts('optouts', data)
+
+  @classmethod
+  def clean_remote_abuse(cls, data: dict) -> int:
+    return cls.clean_remote_counts('abuse', data)
+
+  @classmethod
+  def clean_remote_bounces(cls, data: dict) -> int:
+    return cls.clean_remote_counts('bounces', data)
+
+  @classmethod
+  def clean_remote_not_opened(cls, data: dict) -> int:
+    return cls.clean_remote_counts('not_opened', data)

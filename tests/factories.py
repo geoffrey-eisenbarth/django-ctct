@@ -15,6 +15,7 @@ def get_factory(
   if include_related:
     factories = {
       ctct_models.Contact: ContactWithRelatedObjsFactory,
+      ctct_models.ContactNote: ContactNoteWithRelatedObjsFactory,
       ctct_models.EmailCampaign: EmailCampaignWithRelatedObjsFactory,
     }
   else:
@@ -89,9 +90,12 @@ class ContactNoteFactory(CTCTModelFactory):
   class Meta:
     model = ctct_models.ContactNote
 
-  #author = factory.SubFactory(UserFactory)
   contact = factory.SubFactory(ContactFactory)
   content = factory.Faker('sentence')
+
+
+class ContactNoteWithRelatedObjsFactory(ContactNoteFactory):
+  author = factory.SubFactory(UserFactory)
 
 
 class ContactPhoneNumberFactory(CTCTModelFactory):
@@ -185,9 +189,29 @@ class CampaignActivityFactory(CTCTModelFactory):
     self.contact_lists.add(*extracted)
 
 
+class CampaignSummaryFactory(DjangoModelFactory):
+  class Meta:
+    model = ctct_models.CampaignSummary
+
+  campaign = factory.SubFactory(EmailCampaignFactory)
+
+  sends = factory.Faker('pyint', min_value=100, max_value=1000)
+  opens = factory.Faker('pyint', min_value=100, max_value=1000)
+  clicks = factory.Faker('pyint', min_value=0, max_value=100)
+  forwards = factory.Faker('pyint', min_value=0, max_value=100)
+  optouts = factory.Faker('pyint', min_value=0, max_value=100)
+  abuse = factory.Faker('pyint', min_value=0, max_value=10)
+  bounces = factory.Faker('pyint', min_value=0, max_value=10)
+  not_opened = factory.Faker('pyint', min_value=0, max_value=10)
+
+
 class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
   campaign_activities = factory.RelatedFactoryList(
     factory=CampaignActivityFactory,
     factory_related_name='campaign',
     size=1,
+  )
+  summary = factory.RelatedFactory(
+    factory=CampaignSummaryFactory,
+    factory_related_name='campaign',
   )

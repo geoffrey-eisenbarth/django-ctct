@@ -9,21 +9,14 @@ from factory.django import mute_signals
 import requests_mock
 
 from django.core.management import call_command
-from django.db import models
 from django.db.models.signals import post_save, pre_delete, m2m_changed
 from django.test import TestCase
 
 from django_ctct.models import (
   CTCTModel, ContactList, CustomField, Contact, ContactCustomField,
-  EmailCampaign, CampaignActivity,
+  EmailCampaign, CampaignActivity, CampaignSummary,
 )
-from django_ctct.managers import EmailCampaignRemoteManager
 from tests.factories import get_factory, TokenFactory
-
-
-class EmailCampaignStats: #(EmailCampaign):
-  #objects = models.Manager()
-  remote = EmailCampaignRemoteManager()
 
 
 class TestImportCommand(TestCase):
@@ -39,7 +32,7 @@ class TestImportCommand(TestCase):
 
   models = [
     ContactList, CustomField, Contact,
-    EmailCampaign, CampaignActivity, EmailCampaignStats,
+    EmailCampaign, CampaignActivity, CampaignSummary,
   ]
   num_objs = {
     ContactList: 50,
@@ -47,7 +40,7 @@ class TestImportCommand(TestCase):
     Contact: 50,
     EmailCampaign: 50,
     CampaignActivity: 50,
-    EmailCampaignStats: 50,
+    CampaignSummary: 50,
   }
   per_request = {
     ContactList: 50,         # limit in [1, 1000]
@@ -55,7 +48,7 @@ class TestImportCommand(TestCase):
     Contact: 50,             # limit in [1, 500]
     EmailCampaign: 50,       # limit in [1, 500]
     CampaignActivity: 1,     # No bulk get
-    EmailCampaignStats: 50,  # Same as EmailCampaign
+    CampaignSummary: 50,     # Same as EmailCampaign
   }
 
   def setUp(self):
@@ -98,10 +91,14 @@ class TestImportCommand(TestCase):
           factory(contact=contact, custom_field=custom_field)
 
       # Create EmailCampaigns and CampaignActivities
-      campaigns = get_factory(EmailCampaign, include_related=True).create_batch(
+      campaigns = get_factory(
+        EmailCampaign,
+        include_related=True
+      ).create_batch(
         self.num_objs[EmailCampaign]
       )
-      activities = list(CampaignActivity.objects.filter(role='primary_email'))
+      activities = CampaignActivity.objects.filter(role='primary_email')
+      summaries = CampaignSummary.objects.all()
 
       # Serialize instances
       # Must do EmailCampaigns before CampaignActivity.contact_lists can be set
@@ -111,7 +108,7 @@ class TestImportCommand(TestCase):
         Contact: contacts,
         EmailCampaign: campaigns,
         CampaignActivity: activities,
-        EmailCampaignStats: campaigns,
+        CampaignSummary: summaries,
       }
       for model, objects in self.objects.items():
         if model is CampaignActivity:
@@ -119,21 +116,6 @@ class TestImportCommand(TestCase):
           for obj in objects:
             count = random.randint(1, 10)
             obj.contact_lists.set(random.sample(lists, count))
-        elif model is EmailCampaignStats:
-          # Add statistics in to EmailCampaigns and serialize
-          stats = {
-            'sends': [100, 1000],
-            'opens': [100, 1000],
-            'clicks': [0, 100],
-            'forwards': [0, 100],
-            'optouts': [0, 100],
-            'abuse': [0, 10],
-            'bounces': [0, 10],
-            'not_opened': [0, 10],
-          }
-          for obj in objects:
-            for field_name, (lb, ub) in stats.items():
-              setattr(obj, field_name, random.randint(lb, ub))
 
         # Serialize and store
         serializer = partial(model.remote.serialize, field_types='all')
@@ -169,13 +151,11 @@ class TestImportCommand(TestCase):
     #   data['_links'] = {'next': {'href': next_endpoint}}
     return data
 
-  @patch('builtins.input')
   @patch('django_ctct.models.Token.decode')
-  def test_import(self, token_decode: MagicMock, input_prompt: MagicMock):
+  def test_import(self, token_decode: MagicMock) -> None:
 
     # Set up MagicMocks
     token_decode.return_value = True
-    input_prompt.side_effect = ['y', 'y', 'y', 'y', 'y', 'y']
 
     # Set up API mocker
     for model in self.models:
@@ -188,14 +168,6 @@ class TestImportCommand(TestCase):
             status_code=200,
             json=datum,
           )
-      elif model is EmailCampaignStats:
-        # Set up the stats endpoint
-        endpoint = '/reports/summary_reports/email_campaign_summaries'
-        self.mock_api.get(
-          url=model.remote.get_url(endpoint=endpoint),
-          status_code=200,
-          json=self.get_api_response(model)
-        )
       else:
         # Mock the bulk GET request
         self.mock_api.get(
@@ -207,7 +179,7 @@ class TestImportCommand(TestCase):
       # Verify factory objects have been deleted
       self.assertEqual(model.objects.count(), 0)
 
-    call_command('import_ctct')
+    call_command('import_ctct', '--noinput')
 
     # Verify the number of requests that were made
     num_requests = sum([

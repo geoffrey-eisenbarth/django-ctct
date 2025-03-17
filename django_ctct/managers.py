@@ -248,8 +248,13 @@ class RemoteManager(BaseRemoteManager):
     }[field_types]
 
     for field_name in field_names:
+      try:
+        value = getattr(obj, field_name, None)
+      except ValueError:
+        print('SERIALIZE ERROR', type(obj), field_name)
+        continue
 
-      if (value := getattr(obj, field_name, None)) is None:
+      if value is None:
         # Don't include null values
         continue
       elif isinstance(value, UUID):
@@ -873,22 +878,6 @@ class EmailCampaignRemoteManager(RemoteManager):
     'campaign_activities',
     'created_at',
     'updated_at',
-    'sends',
-    'opens',
-    'clicks',
-    'forwards',
-    'optouts',
-    'abuse',
-    'bounces',
-    'not_opened',
-    'sends',
-    'opens',
-    'clicks',
-    'forwards',
-    'optouts',
-    'abuse',
-    'bounces',
-    'not_opened',
   )
   API_MAX_LENGTH = {
     'name': 80,
@@ -904,11 +893,6 @@ class EmailCampaignRemoteManager(RemoteManager):
       data = {'name': obj.name}
     else:
       data = super().serialize(obj, field_types)
-      if data.get('sends') is not None:
-        data['unique_counts'] = {
-          stat_field: data.pop(stat_field)
-          for stat_field in self.API_READONLY_FIELDS[-16:]
-        }
     return data
 
   # @task(queue_name='ctct')
@@ -1157,3 +1141,32 @@ class CampaignActivityRemoteManager(RemoteManager):
         f"Cannot unschedule CampaignActivities with role '{obj.role}'."
       )
       raise ValueError(message)
+
+
+class CampaignSummaryRemoteManager(RemoteManager):
+  """Extend RemoteManager to handle creating EmailCampaignSummarys."""
+
+  API_ENDPOINT = '/reports/summary_reports/email_campaign_summaries'
+  API_READONLY_FIELDS = (
+    'campaign_id',
+    'sends',
+    'opens',
+    'clicks',
+    'forwards',
+    'optouts',
+    'abuse',
+    'bounces',
+    'not_opened',
+  )
+
+  def serialize(
+    self,
+    obj: Model,
+    field_types: Literal['editable', 'readonly', 'all'] = 'editable',
+  ) -> dict:
+    data = super().serialize(obj, field_types)
+    data['unique_counts'] = {
+      stat_field: data.pop(stat_field)
+      for stat_field in self.API_READONLY_FIELDS[1:]
+    }
+    return data

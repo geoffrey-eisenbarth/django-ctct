@@ -1,3 +1,4 @@
+import random
 from typing import Literal
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
@@ -16,10 +17,11 @@ from django.utils import timezone
 
 from django_ctct.models import (
   CTCTModel, Token, CustomField,
-  ContactList, Contact, ContactNote,
+  ContactList, Contact, ContactCustomField, ContactNote,
   EmailCampaign,
 )
 from django_ctct.admin import (
+  ContactCustomFieldInline,
   ContactPhoneNumberInline,
   ContactStreetAddressInline,
   ContactNoteInline,
@@ -56,16 +58,22 @@ class ModelAdminTest(TestCase):
     self.client.force_login(self.superuser)
 
     # Create an existing object
-    include_related = (self.model in [Contact, EmailCampaign])
+    include_related = (self.model in [Contact, ContactNote, EmailCampaign])
     self.factory = get_factory(self.model, include_related=include_related)
+
+    if self.model is Contact:
+      # Create ContactLists and CustomFields first
+      self.lists = get_factory(ContactList).create_batch(10)
+      self.custom_fields = get_factory(CustomField).create_batch(2)
+
     with mute_signals(models.signals.post_save):
-      kwargs = {}
+      self.existing_obj = self.factory.create()
       if self.model is Contact:
-        m2m_factory = get_factory(ContactList)
-        kwargs['list_memberships'] = [m2m_factory(), m2m_factory()]
-      elif self.model is EmailCampaign:
-        raise NotImplementedError('How to specify M2M on CampaignActivity?')
-      self.existing_obj = self.factory.create(**kwargs)
+        self.existing_obj.list_memberships.set(random.sample(self.lists, 2))
+
+        factory = get_factory(ContactCustomField)
+        for custom_field in self.custom_fields:
+          factory(contact=self.existing_obj, custom_field=custom_field)
 
   def tearDown(self):
     self.mock_api.stop()
@@ -102,6 +110,7 @@ class ModelAdminTest(TestCase):
     inline_data = {}
     inline_admins = {
       Contact: [
+        ContactCustomFieldInline,
         ContactPhoneNumberInline,
         ContactStreetAddressInline,
         ContactNoteInline,
@@ -116,12 +125,25 @@ class ModelAdminTest(TestCase):
         inline_data[f'{formset.prefix}-{key}'] = value
 
         related_obj_factory = get_factory(inline_admin.model)
+        if inline_admin.model is ContactCustomField:
+          # We want to re-use existing CustomFields
+          kwargs_1 = {'custom_field': self.custom_fields[0]}
+          kwargs_2 = {'custom_field': self.custom_fields[1]}
+        else:
+          kwargs_1, kwargs_2 = {}, {}
+
         related_objs = [
-          related_obj_factory.build(),
-          related_obj_factory.build(),
+          related_obj_factory.build(**kwargs_1),
+          related_obj_factory.build(**kwargs_2),
         ]
+
         for num, related_obj in enumerate(related_objs):
           data = inline_admin.model.remote.serialize(related_obj)
+          if inline_admin.model is ContactCustomField:
+            # Use Django PKs not API ids
+            del data['custom_field_id']
+            data['custom_field'] = self.custom_fields[num].pk
+
           for key, value in data.items():
             inline_data[f'{formset.prefix}-{num}-{key}'] = value
         inline_data[f'{formset.prefix}-TOTAL_FORMS'] = len(related_objs)

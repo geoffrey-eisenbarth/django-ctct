@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand
 from django_ctct.models import (
   CTCTModel, ContactList, CustomField,
   Contact, ContactCustomField,
-  EmailCampaign, CampaignActivity,
+  EmailCampaign, CampaignActivity, CampaignSummary,
 )
 
 
@@ -37,6 +37,7 @@ class Command(BaseCommand):
     Contact,
     EmailCampaign,
     CampaignActivity,
+    CampaignSummary,
   ]
 
   def get_id_to_pk(self, model: Type[CTCTModel]) -> dict:
@@ -64,6 +65,10 @@ class Command(BaseCommand):
       # TODO: Should we delete existing through model instances?
       update_conflicts = False
       unique_fields = update_fields = None
+    elif model is CampaignSummary:
+      update_conflicts = True
+      unique_fields = ['campaign_id']
+      update_fields = model.remote.API_READONLY_FIELDS[1:]
     elif update_fields is None:
       update_fields = [
         f.name
@@ -80,8 +85,11 @@ class Command(BaseCommand):
     if update_conflicts and (django.get_version() < '5.0'):
       # In older versions, enabling the update_conflicts parameter prevented
       # setting the primary key on each model instance.
-      id_to_pk = self.get_id_to_pk(model)
-      [setattr(o, 'pk', id_to_pk[o.api_id]) for o in objs_w_pks]
+      if model is not CampaignSummary:
+        # CampaignSummary doesn't have `api_id` field (or related_objs)
+        # so it's okay to skip this part
+        id_to_pk = self.get_id_to_pk(model)
+        [setattr(o, 'pk', id_to_pk[o.api_id]) for o in objs_w_pks]
 
     # Inform the user
     if not silent:
@@ -91,6 +99,20 @@ class Command(BaseCommand):
       self.stdout.write(message)
 
     return objs_w_pks
+
+  def set_direct_object_pks(
+    self,
+    model: Type[CTCTModel],
+    instances: list[CTCTModel],
+  ) -> None:
+    """Sets pk values for OneToOne and ForeignKeys defined on `model`."""
+    for field in model._meta.get_fields():
+      if field.one_to_one or field.many_to_one:
+        # Convert API id to Django pk (hits db)
+        id_to_pk = self.get_id_to_pk(field.remote_field.model)
+        converter = lambda o: id_to_pk[getattr(o, field.attname)]
+
+        [setattr(o, field.attname, converter(o)) for o in instances]
 
   def set_related_object_pks(
     self,
@@ -133,6 +155,10 @@ class Command(BaseCommand):
       # No values returned
       return
 
+    if model is CampaignSummary:
+      # Convert API id to pk for the OneToOneField with EmailCampaign
+      self.set_direct_object_pks(model, objs)
+
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
 
@@ -173,25 +199,6 @@ class Command(BaseCommand):
         # Upsert now that pks have been set
         self.upsert(related_model, instances, silent=True)
 
-  def import_campaign_stats(self) -> None:
-    """"Imports EmailCampaign stats from CTCT into Django's database."""
-
-    endpoint = '/reports/summary_reports/email_campaign_summaries'
-    update_fields = [
-      'current_status', 'created_at', 'updated_at', 'scheduled_datetime',
-      'sends', 'opens', 'clicks', 'forwards',
-      'optouts', 'abuse', 'bounces', 'not_opened',
-    ]
-
-    EmailCampaign.remote.connect()
-    try:
-      objs, _ = zip(*EmailCampaign.remote.all(endpoint=endpoint))
-    except ValueError:
-      # No values returned
-      return
-    else:
-      self.upsert(EmailCampaign, objs, update_fields=update_fields)
-
   def add_arguments(self, parser: ArgumentParser) -> None:
     """Allow optional keyword arguments."""
 
@@ -215,7 +222,7 @@ class Command(BaseCommand):
     self.stats_only = kwargs['stats_only']
 
     if self.stats_only:
-      self.CTCT_MODELS = []
+      self.CTCT_MODELS = [CampaignSummary]
 
     for model in self.CTCT_MODELS:
       question = f'Import {model.__name__}? (y/n): '
@@ -224,7 +231,3 @@ class Command(BaseCommand):
       else:
         message = f'Skipping {model.__name__}'
         self.stdout.write(self.style.NOTICE(message))
-
-    question = 'Update EmailCampaign statistics? (y/n): '
-    if self.noinput or (input(question).lower()[0] == 'y'):
-      self.import_campaign_stats()

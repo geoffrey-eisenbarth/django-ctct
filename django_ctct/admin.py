@@ -18,8 +18,9 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
   Token, CTCTRemoteModel, ContactList, CustomField,
-  Contact, ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
-  EmailCampaign, CampaignActivity
+  Contact,
+  ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
+  EmailCampaign, CampaignActivity, CampaignSummary,
 )
 from django_ctct.signals import remote_save, remote_delete
 from django_ctct.vendor import mute_signals
@@ -448,51 +449,18 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     'updated_at',
     'current_status',
     'scheduled_datetime',
-    'open_rate',
-    'sends',
-    'bounces',
-    'clicks',
-    'optouts',
-    'abuse',
     'is_synced',
   )
 
-  def open_rate(self, obj: EmailCampaign) -> str:
-    if obj.current_status == 'DONE':
-      r = (obj.opens / obj.sends) if obj.sends else 0
-      s = f'{r:0.2%}'
-    else:
-      s = '-'
-    return s
-  open_rate.admin_order_field = 'open_rate'
-  open_rate.short_description = _('Open Rate')
-
   # ChangeView
+  fieldsets = (
+    (None, {
+      'fields': (
+        'name', 'current_status', 'scheduled_datetime', 'send_preview'
+      ),
+    }),
+  )
   inlines = (CampaignActivityInline, )
-
-  def get_fieldsets(self, request: HttpRequest, obj=None):
-    if obj and (obj.current_status == 'DONE'):
-      fieldsets = (
-        (None, {
-          'fields': ('name', 'current_status', 'scheduled_datetime'),
-        }),
-        ('ANALYTICS', {
-          'fields': (
-            'sends', 'opens', 'clicks', 'forwards',
-            'optouts', 'abuse', 'bounces', 'not_opened',
-          ),
-        }),
-      )
-    else:
-      fieldsets = (
-        (None, {
-          'fields': (
-            'name', 'current_status', 'scheduled_datetime', 'send_preview'
-          ),
-        }),
-      )
-
-    return fieldsets
 
   def get_readonly_fields(self, request: HttpRequest, obj=None):
     readonly_fields = EmailCampaign.remote.API_READONLY_FIELDS
@@ -566,6 +534,47 @@ class EmailCampaignAdmin(RemoteModelAdmin):
     self.message_user(request, message)
 
 
+class CampaignSummaryAdmin(ViewModelAdmin):
+  """Admin functionality for CTCT EmailCampaign Summary Report."""
+
+  # ListView
+  search_fields = ('name', )
+  list_display = (
+    'campaign',
+    'open_rate',
+    'sends',
+    'bounces',
+    'clicks',
+    'optouts',
+    'abuse',
+  )
+
+  def open_rate(self, obj: EmailCampaign) -> str:
+    if obj.current_status == 'DONE':
+      r = (obj.opens / obj.sends) if obj.sends else 0
+      s = f'{r:0.2%}'
+    else:
+      s = '-'
+    return s
+  open_rate.admin_order_field = 'open_rate'
+  open_rate.short_description = _('Open Rate')
+
+  # ChangeView
+  fieldsets = (
+    (None, {
+      'fields': (
+        'campaign',
+      ),
+    }),
+    ('ANALYTICS', {
+      'fields': (
+        'sends', 'opens', 'clicks', 'forwards',
+        'optouts', 'abuse', 'bounces', 'not_opened',
+      ),
+    }),
+  )
+
+
 if getattr(settings, 'CTCT_USE_ADMIN', False):
   admin.site.register(Token, TokenAdmin)
   admin.site.register(ContactList, ContactListAdmin)
@@ -573,3 +582,4 @@ if getattr(settings, 'CTCT_USE_ADMIN', False):
   admin.site.register(Contact, ContactAdmin)
   admin.site.register(ContactNote, ContactNoteAdmin)
   admin.site.register(EmailCampaign, EmailCampaignAdmin)
+  admin.site.register(CampaignSummary, CampaignSummaryAdmin)

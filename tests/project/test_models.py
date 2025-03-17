@@ -85,10 +85,7 @@ class ModelTest(TestCase):
     )
 
     # Save the object, triggering post_save signal
-    try:
-      obj.save()
-    except:
-      breakpoint()
+    obj.save()
 
     # Verify API fields were added
     obj.refresh_from_db()
