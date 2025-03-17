@@ -5,6 +5,6 @@ __pycache__/
 poetry.lock
 .coverage
 django_ctct/migrations/
-tests/**/*.html
+test*.html
 tests/**/htmlcov/
 tests/**/local_settings.py
