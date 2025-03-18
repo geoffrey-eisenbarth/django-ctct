@@ -246,7 +246,7 @@ class ContactNoteInline(admin.TabularInline):
   model = ContactNote
   exclude = ('api_id', )
 
-  extra = 1
+  extra = 0
   max_num = Contact.remote.API_MAX_NOTES
 
   readonly_fields = ('author', 'created_at')
@@ -264,7 +264,7 @@ class ContactCustomFieldInline(admin.TabularInline):
   model = ContactCustomField
   excldue = ('api_id', )
 
-  extra = 1
+  extra = 0
 
 
 class ContactAdmin(RemoteModelAdmin):
