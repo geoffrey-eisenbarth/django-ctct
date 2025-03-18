@@ -6,18 +6,20 @@ from requests.exceptions import HTTPError
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
+from django.contrib.auth import get_user_model
 from django.db.models import signals
 from django.db.models import Model, QuerySet, When, Case, F, FloatField
 from django.forms import ModelForm
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.formats import date_format
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
-  Token, CTCTRemoteModel, ContactList, CustomField,
+  CTCTRemoteModel, ContactList, CustomField,
   Contact,
   ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -77,38 +79,6 @@ class ViewModelAdmin(admin.ModelAdmin):
   def has_delete_permission(self, request: HttpRequest, obj=None):
     """Prevent deletion in the Django admin."""
     return False
-
-
-class TokenAdmin(ViewModelAdmin):
-  """Admin functionality for CTCT Tokens."""
-
-  # ListView
-  list_display_links = None
-  list_display = (
-    'scope',
-    'created_at',
-    'expires_at',
-    'copy_access_token',
-    'copy_refresh_token',
-  )
-
-  def copy_access_token(self, obj: Token) -> str:
-    html = format_html(
-      '<button class="button" onclick="{function}">{copy_icon}</button>',
-      function=f"navigator.clipboard.writeText('{obj.access_token}')",
-      copy_icon=mark_safe('&#128203;'),
-    )
-    return html
-  copy_access_token.short_description = _('Access Token')
-
-  def copy_refresh_token(self, obj: Token) -> str:
-    html = format_html(
-      '<button class="button" onclick="{function}">{copy_icon}</button>',
-      function=f"navigator.clipboard.writeText('{obj.refresh_token}')",
-      copy_icon=mark_safe('&#128203;'),
-    )
-    return html
-  copy_refresh_token.short_description = _('Refresh Token')
 
 
 class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
@@ -213,6 +183,7 @@ class CustomFieldAdmin(RemoteModelAdmin):
     'label',
     'type',
     'created_at',
+    'updated_at',
     'is_synced',
   )
 
@@ -244,12 +215,10 @@ class ContactNoteInline(admin.TabularInline):
   """Inline for adding ContactNotes to a Contact."""
 
   model = ContactNote
-  exclude = ('api_id', )
+  fields = ('content', )
 
   extra = 0
   max_num = Contact.remote.API_MAX_NOTES
-
-  readonly_fields = ('author', 'created_at')
 
   def has_change_permission(
     self,
@@ -368,6 +337,22 @@ class ContactAdmin(RemoteModelAdmin):
     formset.save_m2m()
 
 
+class ContactNoteAuthorFilter(admin.SimpleListFilter):
+  """Only display Users that have authored a ContactNote."""
+
+  title = _('Author')
+  parameter_name = 'author'
+
+  def lookups(self, request, model_admin):
+    authors = get_user_model().objects.exclude(notes__isnull=True)
+    return [(obj.id, str(obj)) for obj in authors]
+
+  def queryset(self, request, queryset):
+    if self.value():
+      queryset = queryset.filter(author_id=self.value())
+    return queryset
+
+
 class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
   """Admin functionality for ContactNotes."""
 
@@ -384,16 +369,26 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
 
   list_display_links = None
   list_display = (
-    'contact',
+    'contact_link',
     'content',
-    'created_at',
     'author',
+    'created_at',
     'is_synced',
   )
   list_filter = (
     'created_at',
-    'author',
+    ContactNoteAuthorFilter,
   )
+
+  def contact_link(self, obj: ContactNote) -> str:
+    url = reverse(
+      f'admin:django_ctct_contact_change',
+      args=[obj.contact.pk],
+    )
+    html = format_html('<a href="{}">{}</a>', url, obj.contact)
+    return html
+  contact_link.short_description = _('Contact')
+  contact_link.admin_order_field = 'contact__email'
 
   def has_delete_permission(self, request: HttpRequest, obj=None):
     """Allow superusers to delete Notes."""
@@ -446,9 +441,10 @@ class EmailCampaignAdmin(RemoteModelAdmin):
   search_fields = ('name', )
   list_display = (
     'name',
-    'updated_at',
     'current_status',
     'scheduled_datetime',
+    'created_at',
+    'updated_at',
     'is_synced',
   )
 
@@ -585,7 +581,6 @@ class CampaignSummaryAdmin(ViewModelAdmin):
 
 
 if getattr(settings, 'CTCT_USE_ADMIN', False):
-  admin.site.register(Token, TokenAdmin)
   admin.site.register(ContactList, ContactListAdmin)
   admin.site.register(CustomField, CustomFieldAdmin)
   admin.site.register(Contact, ContactAdmin)

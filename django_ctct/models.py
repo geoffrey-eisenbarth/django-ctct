@@ -71,10 +71,11 @@ class Token(Model):
     ordering = ('-created_at', )
 
   def __str__(self) -> str:
-    s = formats.date_format(
-      timezone.localtime(self.created_at),
+    expires_at = formats.date_format(
+      timezone.localtime(self.expires_at),
       settings.DATETIME_FORMAT,
     )
+    s = f"{self.token_type} Token (Expires: {expires_at})"
     return s
 
   @property
@@ -448,6 +449,14 @@ class ContactNote(CTCTModel):
     #     name='django_ctct_limit_notes'
     #   ),
     # ]
+
+  def __str__(self) -> str:
+    author = self.author or _('Unknown author')
+    created_at = formats.date_format(
+      timezone.localtime(self.created_at),
+      settings.DATETIME_FORMAT,
+    )
+    return f'{author} on {created_at}'
 
 
 class ContactPhoneNumber(CTCTModel):
