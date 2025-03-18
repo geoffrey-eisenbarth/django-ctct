@@ -91,7 +91,7 @@ class ModelTest(TestCase):
     obj.refresh_from_db()
     self.assertIsNotNone(obj.api_id)
 
-  @patch('django_ctct.models.Token.decode'))
+  @patch('django_ctct.models.Token.decode')
   def test_update(self, token_decode: MagicMock):
 
     token_decode.return_value = True
