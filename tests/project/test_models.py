@@ -26,6 +26,8 @@ from tests.factories import get_factory, TokenFactory
 )
 class ModelTest(TestCase):
 
+  model: CTCTModel
+
   def setUp(self):
     # Set up mock API
     self.mock_api = requests_mock.Mocker()

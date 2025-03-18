@@ -1,5 +1,5 @@
 import random
-from typing import Literal
+from typing import Literal, Tuple
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
 
@@ -40,6 +40,8 @@ HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 )
 @override_settings(CTCT_SYNC_ADMIN=True, CTCT_RAISE_FOR_API=True)
 class ModelAdminTest(TestCase):
+
+  model: CTCTModel
 
   def setUp(self):
     # Set up mock API
@@ -92,7 +94,7 @@ class ModelAdminTest(TestCase):
 
     return data
 
-  def get_form_data(self, obj: CTCTModel) -> (dict, dict):
+  def get_form_data(self, obj: CTCTModel) -> Tuple[dict, dict]:
     """Return data necessary to submit a ModelAdmin form (plus inlines)."""
 
     # Primary form data
