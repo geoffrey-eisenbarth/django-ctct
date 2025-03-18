@@ -9,6 +9,7 @@ from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.db.models import signals
 from django.db.models import Model, QuerySet, When, Case, F, FloatField
+from django.db.models.functions import Cast
 from django.forms import ModelForm
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
@@ -551,7 +552,7 @@ class CampaignSummaryAdmin(ViewModelAdmin):
     qs = qs.annotate(
       open_rate=Case(
         When(sends=0, then=0.0),
-        default=Case(
+        default=Cast(
           F('opens') * 1.0 / F('sends'),  # Avoid int division
           output_field=FloatField(),
         ),
