@@ -91,7 +91,7 @@ class ModelTest(TestCase):
     obj.refresh_from_db()
     self.assertIsNotNone(obj.api_id)
 
-  @patch('django_ctct.models.Token.decode')
+  @patch('django_ctct.models.Token.decode'))
   def test_update(self, token_decode: MagicMock):
 
     token_decode.return_value = True
@@ -105,7 +105,8 @@ class ModelTest(TestCase):
     )
 
     # Save the object, triggering post_save signal
-    # TODO: Wait...is anything being updated?
+    # TODO: GH #10
+    # NOTE: Nothing is being updated!
     self.existing_obj.save()
 
     # Verify object was updated
@@ -118,7 +119,8 @@ class ModelTest(TestCase):
         # Verify API id was correctly stored
         self.assertEqual(str(self.existing_obj.api_id), response_value)
       elif isinstance(response_value, list):
-        # TODO: Verify ManyToMany (update the code below)
+        # TODO: GH #10
+        # NOTE: Verify ManyToMany (update the code below)
         continue
 
         # Update variable name

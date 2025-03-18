@@ -399,7 +399,8 @@ class RemoteManager(BaseRemoteManager):
           related_objs[field.related_model] = objs
         elif all(isinstance(_, str) for _ in related_data):
           # ManyToManyField, make a list of "through model" instances
-          # TODO PUSH: This relies on old code where API ids were used.
+          # TODO: GH #12
+          # NOTE: This relies on old code where API ids were used
           ThroughModel = getattr(self.model, field.name).through
           model_attname = f'{field.model._meta.model_name}_id'
           other_attname = f'{field.related_model._meta.model_name}_id'
@@ -880,7 +881,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     'updated_at',
   )
   API_MAX_LENGTH = {
-    'name': 80,
+    'name': 80,  # TODO: GH #2
   }
 
   def serialize(
@@ -1013,8 +1014,8 @@ class CampaignActivityRemoteManager(RemoteManager):
     'from_name': 100,
     'from_email': 80,
     'reply_to_email': 80,
-    'subject': 200,     # Not documented
-    'preheader': 130,   # Not documented  # TODO: Can it be bigger?
+    'subject': 200,     # TODO: GH #2
+    'preheader': 130,   # TODO: GH #2
     'html_content': int(15e4),
   }
   API_GET_QUERIES = {

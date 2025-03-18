@@ -145,7 +145,8 @@ class TestImportCommand(TestCase):
       # This key is e.g. 'lists' or 'contacts', but we don't call it directly
       'data': self.data[model],
     }
-    # TODO: Infinite loop if we're calling get_api_url()
+    # TODO: GH #3
+    # NOTE: Infinite loop if we're calling get_api_url()
     # if 'cursor' not in (url := self.get_api_url()):
     #   next_endpoint = url.split('v3')[-1] + '&cursor=cursor'
     #   data['_links'] = {'next': {'href': next_endpoint}}

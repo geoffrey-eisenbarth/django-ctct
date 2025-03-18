@@ -34,7 +34,6 @@ from tests.factories import get_factory, TokenFactory
 HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 
-# TODO: How to do inline customfield checking?
 @parameterized_class(
   ('model', ),
   [(ContactList, ), (CustomField, ), (Contact, )],
@@ -193,15 +192,14 @@ class ModelAdminTest(TestCase):
     self.assertIsNotNone(obj.api_id)
 
     # Verify inline objects were created
-    # TODO?
+    # TODO: GH #9
     if inline_data:
       pass
 
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
 
-  # TODO: How to check updating inlines
-  # TODO: Updating a Contact with no lists issues DELETE
+  # TODO: GH #5
   @patch('django_ctct.models.Token.decode')
   def test_update(self, token_decode: MagicMock):
 
@@ -254,6 +252,11 @@ class ModelAdminTest(TestCase):
     for field, value in other_obj_data.items():
       self.assertEqual(getattr(self.existing_obj, field), value)
 
+    # Verify inline objects were updated
+    # TODO: GH #9
+    if inline_data:
+      pass
+
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
 
@@ -290,17 +293,6 @@ class ModelAdminTest(TestCase):
     self.assertFalse(
       self.model.objects.filter(pk=self.existing_obj.pk).exists()
     )
-
-    # Verify remote deletion
-    # TODO: Is this considered "testing the API"?
-    # self.mock_api.mock(
-    #   model=self.model,
-    #   method='GET',
-    #   status_code=404,
-    #   api_id=self.existing_obj.api_id,
-    # )
-    # remote_obj, _ = self.model.remote.get(self.existing_obj.api_id)
-    # self.assertIsNone(remote_obj)
 
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)

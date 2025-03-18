@@ -62,7 +62,8 @@ class Command(BaseCommand):
 
     # Perform upsert using `bulk_create()`
     if model._meta.auto_created or (model is ContactCustomField):
-      # TODO: Should we delete existing through model instances?
+      # TODO: GH #3
+      # NOTE: Should we delete existing through model instances?
       update_conflicts = False
       unique_fields = update_fields = None
     elif model is CampaignSummary:

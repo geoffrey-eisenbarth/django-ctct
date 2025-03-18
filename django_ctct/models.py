@@ -441,7 +441,7 @@ class ContactNote(CTCTModel):
     verbose_name = _('Note')
     verbose_name_plural = _('Notes')
 
-    # TODO PUSH: CheckConstraint
+    # TODO: GH #8
     # constraints = [
     #   models.CheckConstraint(
     #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NOTES),
@@ -490,12 +490,12 @@ class ContactPhoneNumber(CTCTModel):
     verbose_name_plural = _('Phone Numbers')
 
     constraints = [
-      # TODO PUSH: UniqueConstraint not enforced by CTCT?
+      # TODO: GH #7
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
       #   name='django_ctct_unique_phone_number',
       # ),
-      # TODO PUSH: CheckConstraint
+      # TODO: GH #8
       # models.CheckConstraint(
       #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
       #   name='django_ctct_limit_phone_numbers',
@@ -573,12 +573,12 @@ class ContactStreetAddress(CTCTModel):
     verbose_name_plural = _('Street Addresses')
 
     constraints = [
-      # TODO PUSH: UniqueConstraint not enforced by CTCT?
+      # TODO: GH #7
       # models.UniqueConstraint(
       #   fields=['contact', 'kind'],
       #   name='django_ctct_unique_street_address',
       # ),
-      # TODO PUSH: CheckConstraint
+      # TODO: GH #8
       # models.CheckConstraint(
       #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
       #   name='django_ctct_limit_street_addresses',
@@ -649,12 +649,12 @@ class ContactCustomField(models.Model):
     verbose_name_plural = _('Custom Fields')
 
     constraints = [
-      # TODO PUSH: UniqueConstraint not enforced by CTCT?
+      # TODO: GH #7
       # models.UniqueConstraint(
       #   fields=['contact', 'custom_field'],
       #   name='django_ctct_unique_custom_field',
       # ),
-      # TODO PUSH: CheckConstraint
+      # TODO: GH #8
       # models.CheckConstraint(
       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
       #   name='django_ctct_limit_custom_fields',
@@ -689,7 +689,7 @@ class EmailCampaign(CTCTRemoteModel):
   # API editable fields
   name = models.CharField(
     max_length=remote.API_MAX_LENGTH['name'],
-    # unique=True,  # TODO PUSH: UniqueConstraint not enforced by CTCT?
+    # unique=True,  # TODO: GH #7
     verbose_name=_('Name'),
   )
   scheduled_datetime = models.DateTimeField(

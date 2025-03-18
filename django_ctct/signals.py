@@ -47,7 +47,7 @@ def remote_update_m2m(sender, instance, action, **kwargs):
   """Updates a Contact's list membership on CTCT servers."""
 
   actions = ['post_add', 'post_remove', 'post_clear']
-  # TODO PUSH: [signals] How to implement this?
+  # TODO: GH #11
   # if (sender is ContactAndContactList) and (action in actions):
   if action in actions:
 
