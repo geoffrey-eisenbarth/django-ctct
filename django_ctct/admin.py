@@ -16,7 +16,6 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.formats import date_format
-from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.models import (
@@ -383,7 +382,7 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
 
   def contact_link(self, obj: ContactNote) -> str:
     url = reverse(
-      f'admin:django_ctct_contact_change',
+      'admin:django_ctct_contact_change',
       args=[obj.contact.pk],
     )
     html = format_html('<a href="{}">{}</a>', url, obj.contact)
