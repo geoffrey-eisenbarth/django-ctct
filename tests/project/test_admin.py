@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from django_ctct.models import (
-  CTCTModel, Token, CustomField,
+  CTCTModel, CustomField,
   ContactList, Contact, ContactCustomField, ContactNote,
   EmailCampaign,
 )
