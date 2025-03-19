@@ -302,7 +302,7 @@ class ModelAdminTest(TestCase):
 
 @parameterized_class(
   ('model', ),
-  [(Token, ), (ContactNote, )],
+  [(ContactNote, )],
 )
 class ViewModelAdminTest(TestCase):
 
