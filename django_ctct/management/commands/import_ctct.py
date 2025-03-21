@@ -92,7 +92,7 @@ class Command(BaseCommand):
     if id_field is not None:
       seen = set()
       objs = [
-        seen.add(getattr(o, id_field) or o
+        seen.add(getattr(o, id_field)) or o
         for o in objs
         if getattr(o, id_field) not in seen
       ]
