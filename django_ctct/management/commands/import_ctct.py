@@ -57,10 +57,12 @@ class Command(BaseCommand):
     update_conflicts: bool = True,
     unique_fields: list[str] = ['api_id'],
     update_fields: Optional[list[str]] = None,
-    silent: bool = False,
+    silent: Optional[bool] = None,
   ) -> list[CTCTModel]:
 
     verb = 'Imported' if (update_fields is None) else 'Updated'
+    if silent is None:
+      silent = self.noinput
 
     # Perform upsert using `bulk_create()`
     if model._meta.auto_created or (model is ContactCustomField):
@@ -188,7 +190,8 @@ class Command(BaseCommand):
     objs_and_related_fields = []
 
     model.remote.connect()
-    for activity in tqdm(model.objects.filter(role='primary_email')):
+    activities = model.objects.filter(role='primary_email')
+    for activity in tqdm(activities, disable=self.noinput):
       obj, related_fields = model.remote.get(activity.api_id)
       obj.pk = activity.pk
       obj.campaign_id = activity.campaign_id
