@@ -82,6 +82,22 @@ class Command(BaseCommand):
         if not f.primary_key and (f.name != 'api_id')
       ]
 
+    # Remove possible duplicates (CTCT API can't be trusted)
+    id_field = None
+    if issubclass(model, CTCTModel):
+      id_field = 'api_id'
+    elif model is CampaignSummary:
+      id_field = 'campaign_id'
+
+    if id_field is not None:
+      seen = set()
+      objs = [
+        seen.add(getattr(o, id_field) or o
+        for o in objs
+        if getattr(o, id_field) not in seen
+      ]
+
+    # Perform the upsert
     objs_w_pks = model.objects.bulk_create(
       objs=objs,
       update_conflicts=update_conflicts,
@@ -195,24 +211,34 @@ class Command(BaseCommand):
         activity = campaign.campaign_activities.get(role='primary_email')
       except CampaignActivity.DoesNotExist:
         # Must fetch from API
-        _, related_fields = EmailCampaign.remote.get(campaign.api_id)
-        activity = next(filter(
-          lambda ca: ca.role == 'primary_email',
-          related_fields[CampaignActivity],
-        ))
-        activity.campaign_id = campaign.pk
-        activity.save()
+        try:
+          _, related_fields = EmailCampaign.remote.get(campaign.api_id)
+        except EmailCampaign.DoesNotExist:
+          # Available in bulk endpoint but not detail endpoint
+          continue
+        else:
+          # Set related object pk and store in db
+          activity = next(filter(
+            lambda ca: ca.role == 'primary_email',
+            related_fields[CampaignActivity],
+          ))
+          activity.campaign_id = campaign.pk
+          activity.save()
 
     # Now fetch CampaignActivity details
     CampaignActivity.remote.connect()
     objs_and_related_fields = []
     activities = CampaignActivity.objects.filter(role='primary_email')
     for activity in tqdm(activities, disable=self.noinput):
-      obj, related_fields = CampaignActivity.remote.get(activity.api_id)
-      obj.pk = activity.pk
-      obj.campaign_id = activity.campaign_id
-
-      objs_and_related_fields.append((obj, related_fields))
+      try:
+        obj, related_fields = CampaignActivity.remote.get(activity.api_id)
+      except CampaignActivity.DoesNotExist:
+        # Came from EmailCampaign detail endpoint but doesn't exist elsewhere
+        continue
+      else:
+        obj.pk = activity.pk
+        obj.campaign_id = activity.campaign_id
+        objs_and_related_fields.append((obj, related_fields))
 
     # TODO: GH #2: API limit is fake
     [setattr(o, 'preheader', o.preheader[:250]) for (o, _) in objs_and_related_fields]  # noqa: E501

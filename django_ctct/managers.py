@@ -448,7 +448,7 @@ class RemoteManager(BaseRemoteManager):
 
     return obj
 
-  def get(self, api_id: str) -> (Optional[Model], dict):
+  def get(self, api_id: str) -> (Model, dict):
     """Gets an existing object from the remote server.
 
     Notes
@@ -468,7 +468,7 @@ class RemoteManager(BaseRemoteManager):
     try:
       data = self.raise_or_json(response)
     except Http404:
-      obj, related_objs = None, {}
+      raise self.model.DoesNotExist(api_id)
     else:
       obj, related_objs = self.deserialize(data)
 
