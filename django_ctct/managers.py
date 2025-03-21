@@ -1003,7 +1003,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     'html_content',
     'contact_lists',
     'format_type',                  # Must include in request
-    'physical_address_in_footer',   # Must incldue in request
+    'physical_address_in_footer',   # Must include in request
   )
   API_READONLY_FIELDS = (
     'api_id',
@@ -1014,8 +1014,8 @@ class CampaignActivityRemoteManager(RemoteManager):
     'from_name': 100,
     'from_email': 80,
     'reply_to_email': 80,
-    'subject': 200,     # TODO: GH #2
-    'preheader': 130,   # TODO: GH #2
+    'subject': 200,
+    'preheader': 250,
     'html_content': int(15e4),
   }
   API_GET_QUERIES = {
