@@ -1,9 +1,11 @@
 from argparse import ArgumentParser
+from collections import defaultdict
 from typing import Optional, Type
 
 from tqdm import tqdm
 
 import django
+from django.utils.translation import gettext_lazy as _
 from django.core.management.base import BaseCommand
 
 from django_ctct.models import (
@@ -62,8 +64,9 @@ class Command(BaseCommand):
 
     # Perform upsert using `bulk_create()`
     if model._meta.auto_created or (model is ContactCustomField):
-      # TODO: GH #3
-      # NOTE: Should we delete existing through model instances?
+      if not issubclass(model, CTCTModel):
+        # Delete ManyToMany objects
+        model.objects.all().delete()
       update_conflicts = False
       unique_fields = update_fields = None
     elif model is CampaignSummary:
@@ -106,7 +109,7 @@ class Command(BaseCommand):
     model: Type[CTCTModel],
     instances: list[CTCTModel],
   ) -> None:
-    """Sets pk values for OneToOne and ForeignKeys defined on `model`."""
+    """Sets Django pk values for OneToOne and ForeignKeys objects."""
     for field in model._meta.get_fields():
       if field.one_to_one or field.many_to_one:
         # Convert API id to Django pk (hits db)
@@ -117,30 +120,31 @@ class Command(BaseCommand):
 
   def set_related_object_pks(
     self,
-    model: Type[CTCTModel],
-    obj_w_pk: CTCTModel,
-    related_model: Type[CTCTModel],
-    instances: list[CTCTModel],
+    model: CTCTModel,
+    objs_w_pks: list[CTCTModel],
+    related_objs: list[dict],
   ) -> None:
-    """Sets pk values for various related object."""
-    for field in related_model._meta.get_fields():
-      if field.remote_field:
-        if field.name == 'author':
-          # CTCT doesn't store Author info
-          continue
-        if field.many_to_many and (instances[0].pk is None):
-          # Can't save ManyToMany until parent object has pk
-          continue
-        elif field.remote_field.model is model:
-          # No need to hit the db, we know the pk is obj_w_pk.pk
-          converter = lambda _: obj_w_pk.pk
-        else:
-          # Convert API id to Django pk (hits db)
-          id_to_pk = self.get_id_to_pk(field.remote_field.model)
-          converter = lambda o: id_to_pk[getattr(o, field.attname)]
+    """Sets Django pk values for ManyToMany and ReverseForeignKey objects."""
+    for obj_w_pk, related_objs in zip(objs_w_pks, related_objs):
+      for related_model, instances in related_objs.items():
+        for field in related_model._meta.get_fields():
+          if field.remote_field:
+            if field.name == 'author':
+              # CTCT doesn't store Author info
+              continue
+            if field.many_to_many and (instances[0].pk is None):
+              # Can't save ManyToMany until parent object has pk
+              continue
+            elif field.remote_field.model is model:
+              # No need to hit the db, we know the pk is obj_w_pk.pk
+              converter = lambda _: obj_w_pk.pk
+            else:
+              # Convert API id to Django pk (hits db)
+              id_to_pk = self.get_id_to_pk(field.remote_field.model)
+              converter = lambda o: id_to_pk[getattr(o, field.attname)]
 
-        # Set pks on related objects
-        [setattr(o, field.attname, converter(o)) for o in instances]
+            # Set pks on related objects
+            [setattr(o, field.attname, converter(o)) for o in instances]
 
   def import_model(self, model: CTCTModel) -> None:
     """Imports objects from CTCT into Django's database."""
@@ -157,18 +161,24 @@ class Command(BaseCommand):
       return
 
     if model is CampaignSummary:
-      # Convert API id to pk for the OneToOneField with EmailCampaign
+      # Convert API id to Django pk for the OneToOneField with EmailCampaign
       self.set_direct_object_pks(model, objs)
 
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
 
-    for obj_w_pk, related_objs in zip(objs_w_pks, related_objs):
-      for related_model, instances in related_objs.items():
-        self.set_related_object_pks(model, obj_w_pk, related_model, instances)
+    # Convert API id to Django pk for related objects
+    self.set_related_object_pks(model, objs_w_pks, related_objs)
 
-        # Upsert now that pks have been set
-        self.upsert(related_model, instances, silent=True)
+    # Reshape related_objs for efficiency
+    rows, related_objs = related_objs, defaultdict(list)
+    for row in rows:
+      for related_model, instances in row.items():
+        related_objs[related_model].extend(instances)
+
+    # Upsert related_objs
+    for related_model, related_objs in related_objs.items():
+      self.upsert(related_model, related_objs)
 
   def import_campaign_activities(self) -> None:
     """CampaignActivities must be imported one at a time."""
@@ -226,9 +236,14 @@ class Command(BaseCommand):
       self.CTCT_MODELS = [CampaignSummary]
 
     for model in self.CTCT_MODELS:
-      question = f'Import {model.__name__}? (y/n): '
+      if model is CampaignActivity:
+        note = "Note: This will result in 1 API request per EmailCampaign! "
+      else:
+        note = ""
+      question = _(f'Import {model.__name__}? {note}(y/n): ')
+
       if self.noinput or (input(question).lower()[0] == 'y'):
         self.import_model(model)
       else:
-        message = f'Skipping {model.__name__}'
+        message = _(f'Skipping {model.__name__}')
         self.stdout.write(self.style.NOTICE(message))
