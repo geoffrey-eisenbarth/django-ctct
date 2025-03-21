@@ -243,9 +243,12 @@ class RemoteManager(BaseRemoteManager):
     for field_name in field_names:
       try:
         value = getattr(obj, field_name, None)
-      except ValueError:
-        print('SERIALIZE ERROR', type(obj), field_name)
-        continue
+      except ValueError as e:
+        if obj._meta.get_field(field_name).many_to_many and (obj.pk is None):
+          # Can't access related field when obj.pk is None
+          continue
+        else:
+          raise e
 
       if value is None:
         # Don't include null values
