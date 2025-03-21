@@ -1,11 +1,7 @@
 import datetime as dt
-import logging
 
 from django.db.models import Model
 from django.utils import timezone
-
-
-logger = logging.getLogger('django_ctct')
 
 
 def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:

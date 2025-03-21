@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import logging
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, NoReturn
 from urllib.parse import urlencode
@@ -33,12 +32,6 @@ if TYPE_CHECKING:
     Token, Contact, ContactList,
     EmailCampaign, CampaignActivity,
   )
-
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-log = logging.getLogger('urllib3')
-log.setLevel(logging.DEBUG)
 
 
 class BaseRemoteManager(models.Manager):
