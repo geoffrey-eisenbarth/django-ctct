@@ -160,12 +160,31 @@ class TestImportCommand(TestCase):
 
     # Set up API mocker
     for model in self.models:
-      if model is CampaignActivity:
-        # No bulk GET, must request each CampaignActivity individually
-        id_label = model.remote.API_ID_LABEL
-        for datum in self.data[model]:
+      if model is EmailCampaign:
+        # Set up single, detailed endpoint first
+        id_label = EmailCampaign.remote.API_ID_LABEL
+        for datum in self.data[EmailCampaign]:
           self.mock_api.get(
-            url=self.get_api_url(model, api_id=datum[id_label]),
+            url=self.get_api_url(EmailCampaign, api_id=datum[id_label]),
+            status_code=200,
+            json=datum.copy(),
+          )
+
+          # Bulk endpoint does not contain CampaignActivity info
+          datum.pop('campaign_activities')
+
+        # Now set up bulk endpoint (without CampaignActivity info)
+        self.mock_api.get(
+          url=self.get_api_url(EmailCampaign),
+          status_code=200,
+          json=self.get_api_response(model),
+        )
+      elif model is CampaignActivity:
+        # No bulk GET, must request each CampaignActivity individually
+        id_label = CampaignActivity.remote.API_ID_LABEL
+        for datum in self.data[CampaignActivity]:
+          self.mock_api.get(
+            url=self.get_api_url(CampaignActivity, api_id=datum[id_label]),
             status_code=200,
             json=datum,
           )
@@ -186,7 +205,7 @@ class TestImportCommand(TestCase):
     num_requests = sum([
       ceil(self.num_objs[model] / self.per_request[model])
       for model in self.models
-    ])
+    ]) + self.num_objs[EmailCampaign]
     self.assertEqual(self.mock_api.call_count, num_requests)
 
     # Verify that objects have been created

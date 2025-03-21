@@ -165,6 +165,9 @@ class Command(BaseCommand):
     if model is CampaignSummary:
       # Convert API id to Django pk for the OneToOneField with EmailCampaign
       self.set_direct_object_pks(model, objs)
+    elif model is EmailCampaign:
+      # TODO: GH #2: API limit is fake
+      [setattr(o, 'name', o.name[:80]) for o in objs]
 
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
@@ -185,22 +188,38 @@ class Command(BaseCommand):
   def import_campaign_activities(self) -> None:
     """CampaignActivities must be imported one at a time."""
 
-    model = CampaignActivity
+    # First make sure CampaignActivity api id's are stored locally
+    EmailCampaign.remote.connect()
+    for campaign in EmailCampaign.objects.prefetch_related('campaign_activities'):  # noqa: E501
+      try:
+        activity = campaign.campaign_activities.get(role='primary_email')
+      except CampaignActivity.DoesNotExist:
+        # Must fetch from API
+        _, related_fields = EmailCampaign.remote.get(campaign.api_id)
+        activity = next(filter(
+          lambda ca: ca.role == 'primary_email',
+          related_fields[CampaignActivity],
+        ))
+        activity.campaign_id = campaign.pk
+        activity.save()
 
+    # Now fetch CampaignActivity details
+    CampaignActivity.remote.connect()
     objs_and_related_fields = []
-
-    model.remote.connect()
-    activities = model.objects.filter(role='primary_email')
+    activities = CampaignActivity.objects.filter(role='primary_email')
     for activity in tqdm(activities, disable=self.noinput):
-      obj, related_fields = model.remote.get(activity.api_id)
+      obj, related_fields = CampaignActivity.remote.get(activity.api_id)
       obj.pk = activity.pk
       obj.campaign_id = activity.campaign_id
 
       objs_and_related_fields.append((obj, related_fields))
 
+    # TODO: GH #2: API limit is fake
+    [setattr(o, 'preheader', o.preheader[:250]) for (o, _) in objs_and_related_fields]  # noqa: E501
+
     # Upsert objects to update fields
     self.upsert(
-      model=model,
+      model=CampaignActivity,
       objs=[o for (o, _) in objs_and_related_fields],
       unique_fields=['campaign_id', 'role'],
       update_fields=['role', 'subject', 'preheader', 'html_content']
@@ -208,7 +227,7 @@ class Command(BaseCommand):
 
     # Convert API id to Django pk for related objects
     objs_w_pks, related_fields = zip(*objs_and_related_fields)
-    self.set_related_object_pks(model, objs_w_pks, related_fields)
+    self.set_related_object_pks(CampaignActivity, objs_w_pks, related_fields)
 
     # Reshape related_fields for efficiency
     rows, related_fields = related_fields, defaultdict(list)
