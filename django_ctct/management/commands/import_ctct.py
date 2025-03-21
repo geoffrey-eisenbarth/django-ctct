@@ -122,17 +122,17 @@ class Command(BaseCommand):
     self,
     model: CTCTModel,
     objs_w_pks: list[CTCTModel],
-    related_objs: list[dict],
+    related_fields: list[dict],
   ) -> None:
     """Sets Django pk values for ManyToMany and ReverseForeignKey objects."""
-    for obj_w_pk, related_objs in zip(objs_w_pks, related_objs):
-      for related_model, instances in related_objs.items():
+    for obj_w_pk, related_fields in zip(objs_w_pks, related_fields):
+      for related_model, related_objs in related_fields.items():
         for field in related_model._meta.get_fields():
           if field.remote_field:
             if field.name == 'author':
               # CTCT doesn't store Author info
               continue
-            if field.many_to_many and (instances[0].pk is None):
+            if field.many_to_many and (related_objs[0].pk is None):
               # Can't save ManyToMany until parent object has pk
               continue
             elif field.remote_field.model is model:
@@ -144,7 +144,7 @@ class Command(BaseCommand):
               converter = lambda o: id_to_pk[getattr(o, field.attname)]
 
             # Set pks on related objects
-            [setattr(o, field.attname, converter(o)) for o in instances]
+            [setattr(o, field.attname, converter(o)) for o in related_objs]
 
   def import_model(self, model: CTCTModel) -> None:
     """Imports objects from CTCT into Django's database."""
@@ -155,7 +155,7 @@ class Command(BaseCommand):
 
     model.remote.connect()
     try:
-      objs, related_objs = zip(*model.remote.all())
+      objs, related_fields = zip(*model.remote.all())
     except ValueError:
       # No values returned
       return
@@ -168,16 +168,16 @@ class Command(BaseCommand):
     objs_w_pks = self.upsert(model, objs)
 
     # Convert API id to Django pk for related objects
-    self.set_related_object_pks(model, objs_w_pks, related_objs)
+    self.set_related_object_pks(model, objs_w_pks, related_fields)
 
-    # Reshape related_objs for efficiency
-    rows, related_objs = related_objs, defaultdict(list)
+    # Reshape related_fields for efficiency
+    rows, related_fields = related_fields, defaultdict(list)
     for row in rows:
-      for related_model, instances in row.items():
-        related_objs[related_model].extend(instances)
+      for related_model, related_objs in row.items():
+        related_fields[related_model].extend(related_objs)
 
     # Upsert related_objs
-    for related_model, related_objs in related_objs.items():
+    for related_model, related_objs in related_fields.items():
       self.upsert(related_model, related_objs)
 
   def import_campaign_activities(self) -> None:
@@ -185,30 +185,37 @@ class Command(BaseCommand):
 
     model = CampaignActivity
 
-    objs_and_related_objs = []
+    objs_and_related_fields = []
 
     model.remote.connect()
     for activity in tqdm(model.objects.filter(role='primary_email')):
-      obj, related_objs = model.remote.get(activity.api_id)
+      obj, related_fields = model.remote.get(activity.api_id)
       obj.pk = activity.pk
       obj.campaign_id = activity.campaign_id
 
-      objs_and_related_objs.append((obj, related_objs))
+      objs_and_related_fields.append((obj, related_fields))
 
     # Upsert objects to update fields
     self.upsert(
       model=model,
-      objs=[_[0] for _ in objs_and_related_objs],
+      objs=[o for (o, _) in objs_and_related_fields],
       unique_fields=['campaign_id', 'role'],
       update_fields=['role', 'subject', 'preheader', 'html_content']
     )
 
-    for obj_w_pk, related_objs in objs_and_related_objs:
-      for related_model, instances in related_objs.items():
-        self.set_related_object_pks(model, obj_w_pk, related_model, instances)
+    # Convert API id to Django pk for related objects
+    objs_w_pks, related_fields = zip(*objs_and_related_fields)
+    self.set_related_object_pks(model, objs_w_pks, related_fields)
 
-        # Upsert now that pks have been set
-        self.upsert(related_model, instances, silent=True)
+    # Reshape related_fields for efficiency
+    rows, related_fields = related_fields, defaultdict(list)
+    for row in rows:
+      for related_model, related_objs in row.items():
+        related_fields[related_model].extend(related_objs)
+
+    # Upsert related_objs
+    for related_model, related_objs in related_fields.items():
+      self.upsert(related_model, related_objs)
 
   def add_arguments(self, parser: ArgumentParser) -> None:
     """Allow optional keyword arguments."""
