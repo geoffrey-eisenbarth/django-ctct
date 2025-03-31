@@ -181,9 +181,6 @@ class Command(BaseCommand):
     if model is CampaignSummary:
       # Convert API id to Django pk for the OneToOneField with EmailCampaign
       self.set_direct_object_pks(model, objs)
-    elif model is EmailCampaign:
-      # TODO: GH #2: API limit is fake
-      [setattr(o, 'name', o.name[:80]) for o in objs]
 
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
@@ -239,9 +236,6 @@ class Command(BaseCommand):
         obj.pk = activity.pk
         obj.campaign_id = activity.campaign_id
         objs_and_related_fields.append((obj, related_fields))
-
-    # TODO: GH #2: API limit is fake
-    [setattr(o, 'preheader', o.preheader[:250]) for (o, _) in objs_and_related_fields]  # noqa: E501
 
     # Upsert objects to update fields
     self.upsert(
