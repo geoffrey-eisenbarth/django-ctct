@@ -571,17 +571,9 @@ class RemoteManager(BaseRemoteManager):
     """Deletes multiple objects from remote server in batches."""
 
     try:
-      api_max_ids = {
-        'Contact': 500,
-        'ContactList': 100,
-        'CustomField': 100,
-      }[self.model.__name__]
-      endpoint = {
-        'Contact': '/activities/contact_delete',
-        'ContactList': '/activities/list_delete',
-        'CustomField': '/activities/custom_fields_delete',
-      }[self.model.__name__]
-    except KeyError:
+      api_max_ids = self.API_ENDPOINT_BULK_LIMIT
+      endpoint = self.API_ENDPOINT_BULK_DELETE
+    except AttributeError:
       name = self.model.__name__
       message = _(
         f"ConstantContact does not support bulk deletion of {name}."
@@ -597,7 +589,7 @@ class RemoteManager(BaseRemoteManager):
     for i in range(0, len(api_ids), api_max_ids):
       self.check_api_limit()
       response = self.session.post(
-        url=self.get_url(endpoint=endpoint),
+        url=self.get_url(endpoint=self.API_ENDPOINT_BULK_DELETE),
         json={api_id_label: api_ids[i:i + api_max_ids]},
       )
       self.raise_or_json(response)
@@ -607,6 +599,8 @@ class ContactListRemoteManager(RemoteManager):
   """Extend RemoteManager to handle adding multiple Contacts."""
 
   API_ENDPOINT = '/contact_lists'
+  API_ENDPOINT_BULK_DELETE = '/activities/list_delete'
+  API_ENDPOINT_BULK_LIMIT = 100
   API_ID_LABEL = 'list_id'
   API_EDITABLE_FIELDS = (
     'name',
@@ -662,6 +656,8 @@ class CustomFieldRemoteManager(RemoteManager):
   """Extend RemoteManager to handle CustomFields."""
 
   API_ENDPOINT = '/contact_custom_fields'
+  API_ENDPOINT_BULK_DELETE = '/activities/custom_fields_delete'
+  API_ENDPOINT_BULK_LIMIT = 100
   API_ID_LABEL = 'custom_field_id'
   API_EDITABLE_FIELDS = (
     'label',
@@ -683,6 +679,8 @@ class ContactRemoteManager(RemoteManager):
   """Extend RemoteManager to handle Contacts."""
 
   API_ENDPOINT = '/contacts'
+  API_ENDPOINT_BULK_DELETE = '/activities/contact_delete'
+  API_ENDPOINT_BULK_LIMIT = 500
   API_ID_LABEL = 'contact_id'
 
   API_EDITABLE_FIELDS = (

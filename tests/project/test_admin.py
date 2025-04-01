@@ -18,7 +18,7 @@ from django.utils import timezone
 from django_ctct.models import (
   CTCTModel, CustomField,
   ContactList, Contact, ContactCustomField, ContactNote,
-  EmailCampaign,
+  EmailCampaign, CampaignSummary,
 )
 from django_ctct.admin import (
   ContactCustomFieldInline,
@@ -299,10 +299,44 @@ class ModelAdminTest(TestCase):
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
 
+  @patch('django_ctct.models.Token.decode')
+  def test_bulk_delete(self, token_decode: MagicMock):
+
+    token_decode.return_value = True
+
+    # Set up API mocker
+    self.mock_api.post(
+      url=self.model.remote.get_url(
+        endpoint=self.model.remote.API_ENDPOINT_BULK_DELETE
+      ),
+      status_code=201,
+      json={},  # Response is not used by django_ctct
+    )
+
+    # Create objects
+    with mute_signals(models.signals.post_save):
+      num_calls = 2
+      size = self.model.remote.API_ENDPOINT_BULK_LIMIT * num_calls
+      objs = self.factory.create_batch(size=size)
+      pks = [o.pk for o in objs]
+
+    # Use ModelAdmin to perform bulk delete
+    model_admin = admin.site._registry[self.model]
+    model_admin.delete_queryset(
+      request=None,
+      queryset=self.model.objects.filter(pk__in=pks),
+    )
+
+    # Verify objects were deleted
+    self.assertFalse(self.model.objects.filter(pk__in=pks).exists())
+
+    # Verify the number of requests that were made
+    self.assertEqual(self.mock_api.call_count, num_calls)
+
 
 @parameterized_class(
   ('model', ),
-  [(ContactNote, )],
+  [(ContactNote, CampaignSummary, )],
 )
 class ViewModelAdminTest(TestCase):
 

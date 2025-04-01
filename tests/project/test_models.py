@@ -169,3 +169,33 @@ class ModelTest(TestCase):
     self.assertFalse(
       self.model.objects.filter(pk=self.existing_obj.pk).exists()
     )
+
+  @patch('django_ctct.models.Token.decode')
+  def test_bulk_delete(self, token_decode: MagicMock):
+
+    token_decode.return_value = True
+
+    # Set up API mocker
+    self.mock_api.post(
+      url=self.model.remote.get_url(
+        endpoint=self.model.remote.API_ENDPOINT_BULK_DELETE
+      ),
+      status_code=201,
+      json={},  # The response is not used by django_ctct
+    )
+
+    # Create objects
+    with mute_signals(post_save, m2m_changed):
+      num_calls = 2
+      size = self.model.remote.API_ENDPOINT_BULK_LIMIT * num_calls
+      objs = self.factory.create_batch(size=size)
+
+    # Bulk delete
+    self.model.remote.bulk_delete(objs)
+
+    # Verify the number of requests that were made
+    self.assertEqual(self.mock_api.call_count, num_calls)
+
+    #self.assertFalse(
+    #  self.model.objects.filter(pk=self.existing_obj.pk).exists()
+    #)

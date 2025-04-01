@@ -56,6 +56,8 @@ class RemoteSyncMixin:
 class ViewModelAdmin(admin.ModelAdmin):
   """Remove CRUD permissions."""
 
+  actions = None
+
   def has_add_permission(self, request: HttpRequest, obj=None):
     """Prevent creation in the Django admin."""
     return False
@@ -435,9 +437,17 @@ class CampaignActivityInline(admin.StackedInline):
 
 
 class EmailCampaignAdmin(RemoteModelAdmin):
-  """Admin functionality for CTCT EmailCampaigns."""
+  """Admin functionality for CTCT EmailCampaigns.
+
+  Notes
+  -----
+  CTCT does not provide an endpoint for bulk deleting EmailCampaigns, so we set
+  `actions` to None.
+
+  """
 
   # ListView
+  actions = None
   search_fields = ('name', )
   list_display = (
     'name',
