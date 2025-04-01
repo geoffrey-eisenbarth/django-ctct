@@ -589,7 +589,7 @@ class RemoteManager(BaseRemoteManager):
     for i in range(0, len(api_ids), api_max_ids):
       self.check_api_limit()
       response = self.session.post(
-        url=self.get_url(endpoint=self.API_ENDPOINT_BULK_DELETE),
+        url=self.get_url(endpoint=endpoint),
         json={api_id_label: api_ids[i:i + api_max_ids]},
       )
       self.raise_or_json(response)
