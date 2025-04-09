@@ -36,7 +36,7 @@ HttpMethod = Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 @parameterized_class(
   ('model', ),
-  [(ContactList, ), (CustomField, ), (Contact, )],
+  [(ContactList, ), (CustomField, ), (Contact, ), (EmailCampaign, ),],
 )
 @override_settings(CTCT_SYNC_ADMIN=True, CTCT_RAISE_FOR_API=True)
 class ModelAdminTest(TestCase):
@@ -193,11 +193,6 @@ class ModelAdminTest(TestCase):
     self.assertIsNotNone(obj)
     self.assertIsNotNone(obj.api_id)
 
-    # Verify inline objects were created
-    # TODO: GH #9
-    if inline_data:
-      pass
-
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
 
@@ -253,11 +248,6 @@ class ModelAdminTest(TestCase):
     self.existing_obj.refresh_from_db()
     for field, value in other_obj_data.items():
       self.assertEqual(getattr(self.existing_obj, field), value)
-
-    # Verify inline objects were updated
-    # TODO: GH #9
-    if inline_data:
-      pass
 
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, 1)
