@@ -4,7 +4,6 @@ __pycache__/
 *.sqlite3
 poetry.lock
 .coverage
-django_ctct/migrations/
 test*.html
 htmlcov/
 tests/**/local_settings.py
