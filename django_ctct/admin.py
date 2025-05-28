@@ -58,15 +58,15 @@ class ViewModelAdmin(admin.ModelAdmin):
 
   actions = None
 
-  def has_add_permission(self, request: HttpRequest, obj=None):
+  def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
     """Prevent creation in the Django admin."""
     return False
 
-  def has_change_permission(self, request: HttpRequest, obj=None):
+  def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
     """Prevent updates in the Django admin."""
     return False
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None):
+  def get_readonly_fields(self, request: HttpRequest, obj=None) -> tuple:
     """Prevent updates in the Django admin."""
     if obj is not None:
       readonly_fields = (
@@ -78,9 +78,9 @@ class ViewModelAdmin(admin.ModelAdmin):
       readonly_fields = tuple()
     return readonly_fields
 
-  def has_delete_permission(self, request: HttpRequest, obj=None):
-    """Prevent deletion in the Django admin."""
-    return False
+  def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+    """Allow superusers to delete objects."""
+    return request.user.is_superuser
 
 
 class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
@@ -116,7 +116,9 @@ class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
     for saving objects remotely.
 
     """
-    form.save_m2m()
+    with mute_signals(signals.m2m_changed):
+      # ManyToMany information is sent to CTCT in PUT call
+      form.save_m2m()
     for formset in formsets:
       self.save_formset(request, form, formset, change=change)
     self.save_remotely(request, form, formsets, change)
@@ -336,7 +338,10 @@ class ContactAdmin(RemoteModelAdmin):
       if isinstance(instance, ContactNote) and instance.pk is None:
         instance.author = request.user
       instance.save()
-    formset.save_m2m()
+
+    with mute_signals(signals.m2m_changed):
+      # ManyToMany information is sent to CTCT in PUT call
+      formset.save_m2m()
 
 
 class ContactNoteAuthorFilter(admin.SimpleListFilter):
@@ -392,7 +397,7 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
   contact_link.short_description = _('Contact')
   contact_link.admin_order_field = 'contact__email'
 
-  def has_delete_permission(self, request: HttpRequest, obj=None):
+  def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
     """Allow superusers to delete Notes."""
     return request.user.is_superuser
 
