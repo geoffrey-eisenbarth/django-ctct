@@ -881,8 +881,7 @@ class CampaignActivity(CTCTRemoteModel):
     if contact_lists := data.pop('contact_lists', None):
       data['contact_list_ids'] = contact_lists
 
-    if self.TRACKING_IMAGE not in data['html_content']:
-      data['html_content'] = self.TRACKING_IMAGE + '\n' + data['html_content']
+    data['html_content'] = self.clean_html_content(data['html_content'])
     return data
 
   @classmethod
@@ -906,6 +905,15 @@ class CampaignActivity(CTCTRemoteModel):
   @classmethod
   def clean_remote_contact_lists(cls, data: dict) -> list[str]:
     return data.pop('contact_list_ids', [])
+
+  def clean_html_content(self, html_content: str) -> str:
+    if self.TRACKING_IMAGE not in html_content:
+      html_content = self.TRACKING_IMAGE + '\n' + html_content
+    return html_content
+
+  def save(self, *args, **kwargs) -> None:
+    self.html_content = self.clean_html_content(self.html_content)
+    super().save(*args, **kwargs)
 
 
 class CampaignSummary(models.Model):
