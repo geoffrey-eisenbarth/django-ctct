@@ -15,7 +15,7 @@ def get_related_fields(model: Model) -> (list, list, list, list):
   reverse_fks = []
 
   for field in model._meta.get_fields():
-    if field.one_to_one:
+    if field.one_to_one and not field.auto_created:
       one_to_ones.append(field)
     elif field.many_to_many:
       many_to_manys.append(field)

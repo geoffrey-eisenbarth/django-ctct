@@ -748,17 +748,8 @@ class ContactRemoteManager(RemoteManager):
     includes all important fields. While the `create_or_update()` method
     supports partial updates, it won't allow us to remove a ContactList.
 
-    CTCT requires that all contacts be a member of at least one ContactList,
-    so in the event of removing someone from all lists, we should actually
-    issue a DELETE call; however, these 'deleted' Contacts retain their ID
-    in ConstantContact's database and can be revived at any time.
-
     """
-    if obj.list_memberships.exists():
-      response = super().update(obj)
-    else:
-      response = self.delete(obj)
-    return response
+    return super().update(obj)
 
   def update_or_create(self, obj: Contact) -> Contact:
     """Updates or creates the Contact based on `email`.
@@ -910,11 +901,13 @@ class EmailCampaignRemoteManager(RemoteManager):
     try:
       activity = obj.campaign_activities.get(role='primary_email')
     except CampaignActivity.DoesNotExist:
-      message = _(
-        "The related `primary_email` CampaignActivity must be saved locally "
-        "before the EmailCampaign can be saved remotely."
-      )
-      raise CampaignActivity.DoesNotExist(message)
+      # The request body must contain the following fields:
+      #   'format_type', 'from_name', 'from_email', 'reply_to_email',
+      #   'subject', and 'html_content'.
+      #
+      # Our CampaignActivity model provides default values for these fields,
+      # so we can simply serialize an "empty" object
+      activity = CampaignActivity()
 
     # Create EmailCampaign and CampaignActivity remotely
     self.check_api_limit()
@@ -940,7 +933,11 @@ class EmailCampaignRemoteManager(RemoteManager):
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
       obj.save()
-      activity.save(update_fields=['api_id'])
+      if activity.pk is None:
+        activity.campaign = obj
+        activity.save()
+      else:
+        activity.save(update_fields=['api_id'])
 
     # Send preview and/or schedule the campaign
     if obj.send_preview or (obj.scheduled_datetime is not None):

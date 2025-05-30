@@ -878,8 +878,9 @@ class CampaignActivity(CTCTRemoteModel):
     return s
 
   def serialize(self, data: dict) -> dict:
-    if contact_lists := data.pop('contact_lists', None):
-      data['contact_list_ids'] = contact_lists
+    if 'contact_lists' in data:
+      # Be careful to include data['contact_lists'] even if it's empty
+      data['contact_list_ids'] = data.pop('contact_lists')
 
     data['html_content'] = self.clean_html_content(data['html_content'])
     return data
