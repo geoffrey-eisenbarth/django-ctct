@@ -16,7 +16,7 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.formats import date_format
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from django_ctct.models import (
   CTCTRemoteModel, ContactList, CustomField,
@@ -46,11 +46,13 @@ def catch_api_errors(func):
 
 
 class RemoteSyncMixin:
+  @admin.display(
+    boolean=True,
+    description=_('Synced'),
+    ordering='api_id',
+  )
   def is_synced(self, obj: CTCTRemoteModel) -> bool:
     return (obj.api_id is not None)
-  is_synced.boolean = True
-  is_synced.admin_order_field = 'api_id'
-  is_synced.short_description = _('Synced')
 
 
 class ViewModelAdmin(admin.ModelAdmin):
@@ -69,7 +71,7 @@ class ViewModelAdmin(admin.ModelAdmin):
   def get_readonly_fields(self, request: HttpRequest, obj=None) -> tuple:
     """Prevent updates in the Django admin."""
     if obj is not None:
-      readonly_fields = (
+      readonly_fields = tuple(
         field.name
         for field in obj._meta.fields
         if field.name != 'active'
@@ -159,13 +161,13 @@ class ContactListAdmin(RemoteModelAdmin):
     'is_synced',
   )
 
+  @admin.display(description=_('Membership'))
   def membership(self, obj: ContactList) -> int:
     return obj.members.all().count()
-  membership.short_description = _('Membership')
 
+  @admin.display(description=_('Opt Outs'))
   def optouts(self, obj: ContactList) -> int:
     return obj.members.exclude(opt_out_source='').count()
-  optouts.short_description = _('Opt Outs')
 
   # ChangeView
   form = ContactListForm
@@ -267,11 +269,13 @@ class ContactAdmin(RemoteModelAdmin):
   )
   empty_value_display = '(None)'
 
+  @admin.display(
+    boolean=True,
+    description=_('Opted Out'),
+    ordering='opt_out_date',
+  )
   def opted_out(self, obj: Contact) -> bool:
     return bool(obj.opt_out_source)
-  opted_out.boolean = True
-  opted_out.admin_order_field = 'opt_out_date'
-  opted_out.short_description = _('Opted Out')
 
   # ChangeView
   fieldsets = (
@@ -310,7 +314,7 @@ class ContactAdmin(RemoteModelAdmin):
     request: HttpRequest,
     obj: Optional[Contact] = None,
   ) -> List[str]:
-    readonly_fields = Contact.remote.API_READONLY_FIELDS
+    readonly_fields = list(Contact.remote.API_READONLY_FIELDS)
     if obj and obj.opt_out_source and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
@@ -387,6 +391,10 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
     ContactNoteAuthorFilter,
   )
 
+  @admin.display(
+    description=_('Contact'),
+    ordering='contact__email',
+  )
   def contact_link(self, obj: ContactNote) -> str:
     url = reverse(
       'admin:django_ctct_contact_change',
@@ -394,8 +402,6 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
     )
     html = format_html('<a href="{}">{}</a>', url, obj.contact)
     return html
-  contact_link.short_description = _('Contact')
-  contact_link.admin_order_field = 'contact__email'
 
   def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
     """Allow superusers to delete Notes."""
@@ -434,10 +440,10 @@ class CampaignActivityInline(admin.StackedInline):
   extra = 1
   max_num = 1
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None):
-    readonly_fields = CampaignActivity.remote.API_READONLY_FIELDS
+  def get_readonly_fields(self, request: HttpRequest, obj=None) -> list[str]:
+    readonly_fields = list(CampaignActivity.remote.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
-      readonly_fields += CampaignActivity.remote.API_EDITABLE_FIELDS
+      readonly_fields += list(CampaignActivity.remote.API_EDITABLE_FIELDS)
     return readonly_fields
 
 
@@ -473,10 +479,10 @@ class EmailCampaignAdmin(RemoteModelAdmin):
   )
   inlines = (CampaignActivityInline, )
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None):
-    readonly_fields = EmailCampaign.remote.API_READONLY_FIELDS
+  def get_readonly_fields(self, request: HttpRequest, obj=None) -> list[str]:
+    readonly_fields = list(EmailCampaign.remote.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
-      readonly_fields += ('scheduled_datetime', )
+      readonly_fields.append('scheduled_datetime')
     return readonly_fields
 
   @catch_api_errors
@@ -574,10 +580,13 @@ class CampaignSummaryAdmin(ViewModelAdmin):
     )
     return qs
 
+  @admin.display(
+    description=_('Open Rate'),
+    ordering='open_rate',
+  )
   def open_rate(self, obj: EmailCampaign) -> str:
+    assert hasattr(obj, 'open_rate')
     return f'{obj.open_rate:0.0%}'
-  open_rate.admin_order_field = 'open_rate'
-  open_rate.short_description = _('Open Rate')
 
   # ChangeView
   fieldsets = (

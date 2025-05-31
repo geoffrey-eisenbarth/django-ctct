@@ -8,7 +8,7 @@ def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:
   return timezone.make_aware(dt.datetime.strptime(s, ts_format))
 
 
-def get_related_fields(model: Model) -> (list, list, list, list):
+def get_related_fields(model: Model) -> tuple[list, list, list, list]:
   one_to_ones = []
   many_to_manys = []
   foreign_keys = []

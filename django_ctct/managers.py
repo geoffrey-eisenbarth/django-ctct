@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import datetime as dt
 from functools import partial
-from typing import TYPE_CHECKING, Literal, Optional, NoReturn
+from typing import (
+  TYPE_CHECKING, Type, TypeVar,
+  Any, Literal, Optional, NoReturn, cast,
+)
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -15,8 +18,7 @@ from requests.models import Response
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import models
-from django.db.models import Model
-from django.db.models import signals
+from django.db.models import signals, Model
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, Http404
 from django.middleware.csrf import get_token as get_csrf_token
@@ -29,21 +31,26 @@ from django_ctct.vendor import mute_signals
 
 if TYPE_CHECKING:
   from django_ctct.models import (
-    Token, Contact, ContactList,
+    CTCTModel, CTCTRemoteModel, Token,
+    Contact, ContactList,
     EmailCampaign, CampaignActivity,
   )
 
 
-class BaseRemoteManager(models.Manager):
-  """Base manager for utilizing an API."""
+class RemoteManagerMixin:
+  """Manager mixin for utilizing an API."""
 
-  API_URL = 'https://api.cc.email'
-  API_VERSION = '/v3'
+  API_URL: str = 'https://api.cc.email'
+  API_VERSION: str = '/v3'
+
+  API_ENDPOINT: str
+  API_ENDPOINT_BULK_DELETE: Optional[str] = None
+  API_ENDPOINT_BULK_LIMIT: Optional[int] = None
 
   @classmethod
   def get_url(
     cls,
-    api_id: Optional[str] = None,
+    api_id: Optional[str | UUID] = None,
     endpoint: Optional[str] = None,
     endpoint_suffix: Optional[str] = None,
   ) -> str:
@@ -61,9 +68,9 @@ class BaseRemoteManager(models.Manager):
 
     return url
 
-  def raise_or_json(self, response: Response) -> Optional[dict]:
+  def raise_or_json(self, response: Response) -> dict[str, Any]:
     if response.status_code == 204:
-      data = None
+      data = {}
     elif response.status_code == 404:
       # Allow catching 404 separately from HTTPError
       raise Http404
@@ -84,38 +91,14 @@ class BaseRemoteManager(models.Manager):
 
     return data
 
-  def _improperly_configured(self):
-    message = _(
-      "You must define this method on a child class."
-    )
-    raise ImproperlyConfigured(message)
 
-  def get_queryset(self):
-    """Prevent access to the db from within RemoteManager."""
-    return super().get_queryset().none()
-
-  def create(self):
-    return self._improperly_configured()
-
-  def get(self):
-    return self._improperly_configured()
-
-  def all(self):
-    return self._improperly_configured()
-
-  def update(self):
-    return self._improperly_configured()
-
-  def delete(self):
-    return self._improperly_configured()
-
-
-class TokenRemoteManager(BaseRemoteManager):
+class TokenRemoteManager(RemoteManagerMixin, models.Manager['Token']):
   """Manager for utilizing CTCT's Auth Token API."""
 
   API_URL = 'https://authz.constantcontact.com/oauth2/default'
   API_VERSION = '/v1'
-  API_SCOPE = '+'.join([
+
+  API_SCOPE: str = '+'.join([
     'account_read',
     'account_update',
     'contact_data',
@@ -140,7 +123,11 @@ class TokenRemoteManager(BaseRemoteManager):
     self.session = requests.Session()
     self.session.auth = (settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY)
 
-  def create(self, auth_code: str) -> Token:
+  def get_queryset(self) -> QuerySet:
+    """Prevent access to the db from within RemoteManager."""
+    return super().get_queryset().none()
+
+  def create(self, auth_code: str) -> Token:  # type: ignore[override]
     """Creates the initial Token using an `auth_code` from CTCT.
 
     Notes
@@ -162,7 +149,7 @@ class TokenRemoteManager(BaseRemoteManager):
     token = self.model.objects.create(**data)
     return token
 
-  def get(self) -> Token:
+  def get(self) -> Token:  # type: ignore[override]
     """Fetches most recent token, refreshing if necessary."""
 
     token = self.model.objects.first()
@@ -181,7 +168,7 @@ class TokenRemoteManager(BaseRemoteManager):
 
     return token
 
-  def update(self, token: Token) -> Token:
+  def update(self, token: Token) -> Token:  # type: ignore[override]
     """Obtain a new Token from CTCT using the refresh code."""
 
     response = self.session.post(
@@ -196,25 +183,23 @@ class TokenRemoteManager(BaseRemoteManager):
     return token
 
 
-class RemoteManager(BaseRemoteManager):
+class RemoteManager(RemoteManagerMixin, models.Manager['CTCTRemoteModel']):
   """Manager for utilizing the CTCT API."""
 
-  API_LIMIT_CALLS = 4   # four calls
-  API_LIMIT_PERIOD = 1  # per second
+  API_LIMIT_CALLS: int = 4   # four calls
+  API_LIMIT_PERIOD: int = 1  # per second
 
-  API_GET_QUERIES = {}
-  API_EDITABLE_FIELDS = tuple()
-  API_READONLY_FIELDS = (
+  API_ID_LABEL: str
+  API_GET_QUERIES: dict = {}
+
+  API_EDITABLE_FIELDS: tuple[str, ...] = tuple()
+  API_READONLY_FIELDS: tuple[str, ...] = (
     'api_id',
   )
 
-  API_MAX_LENGTH = dict()
+  API_MAX_LENGTH: dict = {}
 
-  TS_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
-
-  def get_queryset(self):
-    """Prevent access to the db from within RemoteManager."""
-    return super().get_queryset().none()
+  TS_FORMAT: str = '%Y-%m-%dT%H:%M:%SZ'
 
   def connect(self) -> None:
     from django_ctct.models import Token
@@ -227,7 +212,7 @@ class RemoteManager(BaseRemoteManager):
 
   def serialize(
     self,
-    obj: Model,
+    obj: CTCTRemoteModel,
     field_types: Literal['editable', 'readonly', 'all'] = 'editable',
   ) -> dict:
     """Convert from Django object to API request body."""
@@ -310,7 +295,7 @@ class RemoteManager(BaseRemoteManager):
     self,
     data: dict,
     pk: Optional[int] = None,
-  ) -> (Model, dict):
+  ) -> tuple[CTCTRemoteModel, dict[Type[CTCTModel], list[CTCTModel]]]:
     """Convert from API response body to Django object."""
 
     if not isinstance(data, dict):
@@ -358,7 +343,7 @@ class RemoteManager(BaseRemoteManager):
     self,
     data: dict,
     parent_pk: Optional[int] = None
-  ) -> dict:
+  ) -> dict[str, int]:
     """Deserialize ForeignKeys and OneToOneFields.
 
     Notes
@@ -379,7 +364,7 @@ class RemoteManager(BaseRemoteManager):
     self,
     data: dict,
     parent_pk: Optional[int] = None,
-  ) -> (dict, dict):
+  ) -> tuple[dict[str, Any], dict[Type[Model], list[Model] ]]:
     """Deserialize ManyToManyFields and ReverseForeignKeys."""
 
     related_objs = {}
@@ -409,7 +394,7 @@ class RemoteManager(BaseRemoteManager):
           ]
           related_objs[ThroughModel] = objs
 
-    return data, related_objs
+    return (data, related_objs)
 
   @sleep_and_retry
   @limits(calls=API_LIMIT_CALLS, period=API_LIMIT_PERIOD)
@@ -417,8 +402,12 @@ class RemoteManager(BaseRemoteManager):
     """Honor the API's rate limit."""
     pass
 
+  def get_queryset(self) -> QuerySet:
+    """Prevent access to the db from within RemoteManager."""
+    return super().get_queryset().none()
+
   # @task(queue_name='ctct')
-  def create(self, obj: Model) -> Model:
+  def create(self, obj: CTCTRemoteModel) -> CTCTRemoteModel:  # type: ignore[override]
     """Creates an existing Django object on the remote server.
 
     Notes
@@ -448,7 +437,10 @@ class RemoteManager(BaseRemoteManager):
 
     return obj
 
-  def get(self, api_id: str) -> (Model, dict):
+  def get(  # type: ignore[override]
+    self,
+    api_id: str
+  ) -> tuple[CTCTRemoteModel, dict[Type[Model], list[Model]]]:
     """Gets an existing object from the remote server.
 
     Notes
@@ -474,7 +466,7 @@ class RemoteManager(BaseRemoteManager):
 
     return obj, related_objs
 
-  def all(self, endpoint: Optional[str] = None) -> list[(Model, dict)]:
+  def all(self, endpoint: Optional[str] = None) -> list[CTCTRemoteModel]:  # type: ignore[override]
     """Gets all existing objects from the remote server.
 
     Notes
@@ -484,7 +476,7 @@ class RemoteManager(BaseRemoteManager):
 
     """
 
-    objs = []
+    objs: list[CTCTRemoteModel] = []
 
     paginated = True
     while paginated:
@@ -509,7 +501,7 @@ class RemoteManager(BaseRemoteManager):
     return objs
 
   # @task(queue_name='ctct')
-  def update(self, obj: Model) -> Model:
+  def update(self, obj: CTCTRemoteModel) -> CTCTRemoteModel:  # type: ignore[override]
     """Updates an existing Django object on the remote server.
 
     Notes
@@ -542,9 +534,9 @@ class RemoteManager(BaseRemoteManager):
     return obj
 
   # @task(queue_name='ctct')
-  def delete(
+  def delete(  # type: ignore[override]
     self,
-    obj: Model,
+    obj: CTCTRemoteModel,
     endpoint_suffix: Optional[str] = None,
   ) -> None:
     """Deletes existing Django object(s) on the remote server.
@@ -567,18 +559,21 @@ class RemoteManager(BaseRemoteManager):
       # Allow 404
       self.raise_or_json(response)
 
-  def bulk_delete(self, objs: list[Model]) -> None:
+  def bulk_delete(self, objs: list[CTCTRemoteModel]) -> None:
     """Deletes multiple objects from remote server in batches."""
 
-    try:
-      api_max_ids = self.API_ENDPOINT_BULK_LIMIT
-      endpoint = self.API_ENDPOINT_BULK_DELETE
-    except AttributeError:
+    if self.API_ENDPOINT_BULK_DELETE is None:
       name = self.model.__name__
       message = _(
         f"ConstantContact does not support bulk deletion of {name}."
       )
       raise NotImplementedError(message)
+    elif self.API_ENDPOINT_BULK_LIMIT is None:
+      name = self.model.__name__
+      message = _(
+        f"No API limit specified for {name}."
+      )
+      raise ImproperlyConfigured(message)
 
     # Prepare connection and payloads
     self.connect()
@@ -586,11 +581,11 @@ class RemoteManager(BaseRemoteManager):
     api_ids = [str(o.api_id) for o in objs]
 
     # Remote delete in batches
-    for i in range(0, len(api_ids), api_max_ids):
+    for i in range(0, len(api_ids), self.API_ENDPOINT_BULK_LIMIT):
       self.check_api_limit()
       response = self.session.post(
-        url=self.get_url(endpoint=endpoint),
-        json={api_id_label: api_ids[i:i + api_max_ids]},
+        url=self.get_url(endpoint=self.API_ENDPOINT_BULK_DELETE),
+        json={api_id_label: api_ids[i:i + self.API_ENDPOINT_BULK_LIMIT]},
       )
       self.raise_or_json(response)
 
@@ -601,7 +596,9 @@ class ContactListRemoteManager(RemoteManager):
   API_ENDPOINT = '/contact_lists'
   API_ENDPOINT_BULK_DELETE = '/activities/list_delete'
   API_ENDPOINT_BULK_LIMIT = 100
+
   API_ID_LABEL = 'list_id'
+
   API_EDITABLE_FIELDS = (
     'name',
     'description',
@@ -612,6 +609,7 @@ class ContactListRemoteManager(RemoteManager):
     'created_at',
     'updated_at',
   )
+
   API_MAX_LENGTH = {
     'name': 255,
   }
@@ -629,8 +627,13 @@ class ContactListRemoteManager(RemoteManager):
 
     if contact_list is not None:
       list_ids = [contact_list.api_id]
-    else:
+    elif contact_lists is not None:
       list_ids = list(map(str, contact_lists.values_list('api_id', flat=True)))
+    else:
+      message = _(
+        "Must pass either `contact_list` or `contact_lists`."
+      )
+      raise ValueError(message)
 
     if contacts is not None:
       contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
@@ -658,7 +661,9 @@ class CustomFieldRemoteManager(RemoteManager):
   API_ENDPOINT = '/contact_custom_fields'
   API_ENDPOINT_BULK_DELETE = '/activities/custom_fields_delete'
   API_ENDPOINT_BULK_LIMIT = 100
+
   API_ID_LABEL = 'custom_field_id'
+
   API_EDITABLE_FIELDS = (
     'label',
     'type',
@@ -669,6 +674,7 @@ class CustomFieldRemoteManager(RemoteManager):
     'created_at',
     'updated_at',
   )
+
   API_MAX_LENGTH = {
     'label': 50,
     'name': 50,
@@ -679,9 +685,20 @@ class ContactRemoteManager(RemoteManager):
   """Extend RemoteManager to handle Contacts."""
 
   API_ENDPOINT = '/contacts'
+
   API_ENDPOINT_BULK_DELETE = '/activities/contact_delete'
   API_ENDPOINT_BULK_LIMIT = 500
+
   API_ID_LABEL = 'contact_id'
+  API_GET_QUERIES = {
+    'include': ','.join([
+      'custom_fields',
+      'list_memberships',
+      'notes',
+      'phone_numbers',
+      'street_addresses',
+    ]),
+  }
 
   API_EDITABLE_FIELDS = (
     'email',
@@ -703,15 +720,6 @@ class ContactRemoteManager(RemoteManager):
     'opt_out_date',
     'opt_out_reason',
   )
-  API_GET_QUERIES = {
-    'include': ','.join([
-      'custom_fields',
-      'list_memberships',
-      'notes',
-      'phone_numbers',
-      'street_addresses',
-    ]),
-  }
 
   API_MAX_LENGTH = {
     'first_name': 50,
@@ -720,38 +728,25 @@ class ContactRemoteManager(RemoteManager):
     'company_name': 50,
     'opt_out_reason': 255,
   }
-  API_MAX_NOTES = 150
-  API_MAX_PHONE_NUMBERS = 3
-  API_MAX_STREET_ADDRESSES = 3
-  API_MAX_CUSTOM_FIELDS = 25
-  API_MAX_LIST_MEMBERSHIPS = 50
 
-  def create(self, obj: Contact) -> Contact:
+  API_MAX_NOTES: int = 150
+  API_MAX_PHONE_NUMBERS: int = 3
+  API_MAX_STREET_ADDRESSES: int = 3
+  API_MAX_CUSTOM_FIELDS: int = 25
+  API_MAX_LIST_MEMBERSHIPS: int = 50
+
+  def create(self, obj: Contact) -> Contact:  # type: ignore[override]
     try:
-      response = super().create(obj)
+      obj = cast(Contact, super().create(obj))
     except HTTPError as e:
       if e.response.status_code == 409:
         # Locate the resource via email address and update
-        response = self.update_or_create(obj)
+        obj = self.update_or_create(obj)
       else:
         raise e
-    return response
+    return obj
 
-  # @task(queue_name='ctct')
-  def update(self, obj: Contact) -> Optional[Contact]:
-    """Update Contact and ContactList membership on CTCT servers.
-
-    Notes
-    -----
-    The PUT call will overwrite all properties not included in the request
-    body with NULL, so we need to make sure the `serialize()` method
-    includes all important fields. While the `create_or_update()` method
-    supports partial updates, it won't allow us to remove a ContactList.
-
-    """
-    return super().update(obj)
-
-  def update_or_create(self, obj: Contact) -> Contact:
+  def update_or_create(self, obj: Contact) -> Contact:  # type: ignore[override]
     """Updates or creates the Contact based on `email`.
 
     Notes
@@ -766,6 +761,11 @@ class ContactRemoteManager(RemoteManager):
     updates the fields that are included in the request body. Updates append
     new contact lists or custom fields to the existing `list_memberships` or
     `custom_fields` arrays.
+
+    The PUT call (e.g. just using update()) will overwrite all properties not
+    included in the request body with NULL, so the `serialize()` method must
+    includes all important fields. While the `create_or_update()` method
+    supports partial updates, it won't allow us to remove a ContactList.
 
     """
 
@@ -793,14 +793,18 @@ class ContactRemoteManager(RemoteManager):
       obj.api_id = api_id
       obj.save(update_fields=['api_id'])
 
+    return obj
+
 
 class ContactNoteRemoteManager(RemoteManager):
   """Extend RemoteManager to handle ContactNotes."""
 
   API_ID_LABEL = 'note_id'
+
   API_EDITABLE_FIELDS = (
     'content',
   )
+
   API_MAX_LENGTH = {
     'content': 2000,
   }
@@ -810,6 +814,7 @@ class ContactPhoneNumberRemoteManager(RemoteManager):
   """Extend RemoteManager to handle ContactPhoneNumbers."""
 
   API_ID_LABEL = 'phone_number_id'
+
   API_EDITABLE_FIELDS = (
     'kind',
     'phone_number',
@@ -820,6 +825,7 @@ class ContactStreetAddressRemoteManager(RemoteManager):
   """Extend RemoteManager to handle ContactStreetAddresses."""
 
   API_ID_LABEL = 'street_address_id'
+
   API_EDITABLE_FIELDS = (
     'kind',
     'street',
@@ -844,6 +850,7 @@ class ContactCustomFieldRemoteManager(RemoteManager):
     'custom_field_id',
     'value',
   )
+
   API_MAX_LENGTH = {
     'value': 255,
   }
@@ -853,7 +860,9 @@ class EmailCampaignRemoteManager(RemoteManager):
   """Extend RemoteManager to handle creating EmailCampaigns."""
 
   API_ENDPOINT = '/emails'
+
   API_ID_LABEL = 'campaign_id'
+
   API_EDITABLE_FIELDS = (
     'name',
     'scheduled_datetime',
@@ -865,24 +874,26 @@ class EmailCampaignRemoteManager(RemoteManager):
     'created_at',
     'updated_at',
   )
+
   API_MAX_LENGTH = {
-    'name': 80,  # TODO: GH #2
+    'name': 80,
   }
 
   def serialize(
     self,
-    obj: Model,
+    obj: CTCTRemoteModel,
     field_types: Literal['editable', 'readonly', 'all'] = 'editable',
   ) -> dict:
     if obj.api_id and (field_types == 'editable'):
       # The only field that the API will update
+      obj = cast(EmailCampaign, obj)
       data = {'name': obj.name}
     else:
       data = super().serialize(obj, field_types)
     return data
 
   # @task(queue_name='ctct')
-  def create(self, obj: EmailCampaign) -> EmailCampaign:
+  def create(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]
     """Creates a local EmailCampaign on the remote servers.
 
     Notes
@@ -947,7 +958,7 @@ class EmailCampaignRemoteManager(RemoteManager):
     return obj
 
   # @task(queue_name='ctct')
-  def update(self, obj: EmailCampaign) -> EmailCampaign:
+  def update(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]
     """Update EmailCampaign on remote servers.
 
     Notes
@@ -984,7 +995,17 @@ class CampaignActivityRemoteManager(RemoteManager):
   """Extend RemoteManager to handle scheduling."""
 
   API_ENDPOINT = '/emails/activities'
+
   API_ID_LABEL = 'campaign_activity_id'
+  API_GET_QUERIES = {
+    'include': ','.join([
+      # 'physical_address_in_footer',
+      # 'permalink_url',
+      'html_content',
+      # 'document_properties',
+    ]),
+  }
+
   API_EDITABLE_FIELDS = (
     'from_name',
     'from_email',
@@ -1001,6 +1022,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     'role',
     'current_status',
   )
+
   API_MAX_LENGTH = {
     'from_name': 100,
     'from_email': 80,
@@ -1009,17 +1031,9 @@ class CampaignActivityRemoteManager(RemoteManager):
     'preheader': 250,
     'html_content': int(15e4),
   }
-  API_GET_QUERIES = {
-    'include': ','.join([
-      # 'physical_address_in_footer',
-      # 'permalink_url',
-      'html_content',
-      # 'document_properties',
-    ]),
-  }
 
   # @task(queue_name='ctct')
-  def create(self, obj: CampaignActivity) -> NoReturn:
+  def create(self, obj: CampaignActivity) -> NoReturn:  # type: ignore[override]
     message = _(
       "ConstantContact API does not support creating CampaignActivities. "
       "They are created during the creation of an EmailCampaign."
@@ -1027,7 +1041,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     raise NotImplementedError(message)
 
   # @task(queue_name='ctct')
-  def update(self, obj: Model) -> Model:
+  def update(self, obj: CampaignActivity) -> CampaignActivity:  # type: ignore[override]
     """Update CampaignActivity on remote servers.
 
     Notes
@@ -1049,7 +1063,7 @@ class CampaignActivityRemoteManager(RemoteManager):
     if was_scheduled := (obj.campaign.current_status == 'SCHEDULED'):
       self.unschedule(obj)
 
-    obj = super().update(obj)
+    obj = cast(CampaignActivity, super().update(obj))
 
     if obj.campaign.send_preview:
       self.send_preview(obj)
@@ -1139,6 +1153,7 @@ class CampaignSummaryRemoteManager(RemoteManager):
   """Extend RemoteManager to handle creating EmailCampaignSummarys."""
 
   API_ENDPOINT = '/reports/summary_reports/email_campaign_summaries'
+
   API_READONLY_FIELDS = (
     'campaign_id',
     'sends',
@@ -1153,7 +1168,7 @@ class CampaignSummaryRemoteManager(RemoteManager):
 
   def serialize(
     self,
-    obj: Model,
+    obj: CTCTRemoteModel,
     field_types: Literal['editable', 'readonly', 'all'] = 'editable',
   ) -> dict:
     data = super().serialize(obj, field_types)

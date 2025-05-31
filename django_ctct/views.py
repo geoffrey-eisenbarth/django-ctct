@@ -1,6 +1,6 @@
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from django_ctct.models import Token
 

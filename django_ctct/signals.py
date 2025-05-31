@@ -1,4 +1,4 @@
-from typing import Type, Literal
+from typing import Type, Literal, cast
 
 from django.conf import settings
 from django.db.models import Model
@@ -12,13 +12,16 @@ def remote_save(sender: Type[Model], instance: Model, **kwargs) -> None:
   """Create or update the instance on CTCT servers."""
 
   if isinstance(instance, CTCTRemoteModel):
+    sender = cast(Type[CTCTRemoteModel], sender)
     sender.remote.connect()
+
     if instance.api_id:
       task = sender.remote.update
     else:
       task = sender.remote.create
 
-    if getattr(instance, 'enqueue', settings.CTCT_ENQUEUE_DEFAULT):
+    enqueue = getattr(settings, 'CTCT_ENQUEUE_DEFAULT', False)
+    if getattr(instance, 'enqueue', enqueue) and hasattr(task, 'enqueue'):
       task.enqueue(obj=instance)
     else:
       task(obj=instance)
@@ -28,10 +31,13 @@ def remote_delete(sender: Type[Model], instance: Model, **kwargs) -> None:
   """Delete the instance from CTCT servers."""
 
   if isinstance(instance, CTCTRemoteModel):
+    sender = cast(Type[CTCTRemoteModel], sender)
     sender.remote.connect()
+
     task = sender.remote.delete
 
-    if getattr(instance, 'enqueue', settings.CTCT_ENQUEUE_DEFAULT):
+    enqueue = getattr(settings, 'CTCT_ENQUEUE_DEFAULT', False)
+    if getattr(instance, 'enqueue', enqueue) and hasattr(task, 'enqueue'):
       task.enqueue(obj=instance)
     else:
       task(obj=instance)
@@ -72,9 +78,13 @@ def remote_update_m2m(
       elif sender is ContactList.campaign_activities.through:
         raise NotImplementedError
 
-    instance._meta.model.remote.connect()
-    task = getattr(instance._meta.model.remote, task_name)
-    if getattr(instance, 'enqueue', settings.CTCT_ENQUEUE_DEFAULT):
+    model = cast(Type[CTCTRemoteModel], instance._meta.model)
+    model.remote.connect()
+
+    task = getattr(model.remote, task_name)
+
+    enqueue = getattr(settings, 'CTCT_ENQUEUE_DEFAULT', False)
+    if getattr(instance, 'enqueue', enqueue) and hasattr(task, 'enqueue'):
       task.enqueue(**kwargs)
     else:
       task(**kwargs)

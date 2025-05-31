@@ -1,6 +1,6 @@
 import datetime as dt
 import re
-from typing import Optional
+from typing import ClassVar, Optional
 
 import jwt
 
@@ -38,8 +38,8 @@ class Token(Model):
   )
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = TokenRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[TokenRemoteManager] = TokenRemoteManager()
 
   access_token = models.TextField(
     verbose_name=_('Access Token'),
@@ -100,8 +100,8 @@ class CTCTModel(Model):
   """Common CTCT model methods and properties."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = RemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[RemoteManager] = RemoteManager()
 
   api_id = models.UUIDField(
     null=True,     # Allow objects to be created without CTCT IDs
@@ -129,12 +129,15 @@ class CTCTModel(Model):
     default: Optional[str] = None,
   ) -> Optional[str]:
     if default is None:
-      default = cls._meta.get_field(field_name).default
-      if default is NOT_PROVIDED:
+      field = cls._meta.get_field(field_name)
+      assert(hasattr(field, 'default'))
+      if field.default is NOT_PROVIDED:
         message = _(
           f"Must provide a default value for {cls.__name__}.{field_name}."
         )
         raise ValueError(message)
+      else:
+        default = field.default
 
     if field_name in data:
       # If ConstantContact sends a `None` value, we get the default value
@@ -150,8 +153,8 @@ class CTCTRemoteModel(CTCTModel):
   """Django implementation of a CTCT model that has API endpoints."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = RemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[RemoteManager] = RemoteManager()
 
   # API read-only fields
   created_at = models.DateTimeField(
@@ -173,8 +176,8 @@ class ContactList(CTCTRemoteModel):
   """Django implementation of a CTCT Contact List."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactListRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()
 
   # API editable fields
   name = models.CharField(
@@ -205,8 +208,8 @@ class CustomField(CTCTRemoteModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = CustomFieldRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[CustomFieldRemoteManager] = CustomFieldRemoteManager()
 
   TYPES = (
     ('string', 'Text'),
@@ -253,8 +256,8 @@ class Contact(CTCTRemoteModel):
   """
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()
 
   SALUTATIONS = (
     ('Mr.', 'Mr.'),
@@ -390,7 +393,8 @@ class Contact(CTCTRemoteModel):
   @classmethod
   def clean_remote_opt_out_date(cls, data: dict) -> Optional[dt.datetime]:
     if opt_out_date := data['email_address'].get('opt_out_date'):
-      return to_dt(opt_out_date)
+      opt_out_date = to_dt(opt_out_date)
+    return opt_out_date
 
   @classmethod
   def clean_remote_opt_out_reason(cls, data: dict) -> str:
@@ -409,8 +413,8 @@ class ContactNote(CTCTModel):
   """Django implementation of a CTCT Note."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactNoteRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactNoteRemoteManager] = ContactNoteRemoteManager()
 
   contact = models.ForeignKey(
     Contact,
@@ -463,8 +467,8 @@ class ContactPhoneNumber(CTCTModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactPhoneNumberRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactPhoneNumberRemoteManager] = ContactPhoneNumberRemoteManager()
 
   MISSING_NUMBER = '000-000-0000'
   KINDS = (
@@ -498,18 +502,16 @@ class ContactPhoneNumber(CTCTModel):
     verbose_name = _('Phone Number')
     verbose_name_plural = _('Phone Numbers')
 
-    constraints = [
-      # TODO: GH #7
-      # models.UniqueConstraint(
-      #   fields=['contact', 'kind'],
-      #   name='django_ctct_unique_phone_number',
-      # ),
-      # TODO: GH #8
-      # models.CheckConstraint(
-      #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
-      #   name='django_ctct_limit_phone_numbers',
-      # ),
-    ]
+    # constraints = [
+    #    models.UniqueConstraint(  # TODO: GH #7
+    #      fields=['contact', 'kind'],
+    #      name='django_ctct_unique_phone_number',
+    #    ),
+    #    models.CheckConstraint(   # TODO: GH #8
+    #      check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
+    #      name='django_ctct_limit_phone_numbers',
+    #    ),
+    # ]
 
   def __str__(self) -> str:
     return f'[{self.get_kind_display()}] {self.phone_number}'
@@ -528,8 +530,8 @@ class ContactStreetAddress(CTCTModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactStreetAddressRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactStreetAddressRemoteManager] = ContactStreetAddressRemoteManager()
 
   KINDS = (
     ('home', 'Home'),
@@ -581,18 +583,16 @@ class ContactStreetAddress(CTCTModel):
     verbose_name = _('Street Address')
     verbose_name_plural = _('Street Addresses')
 
-    constraints = [
-      # TODO: GH #7
-      # models.UniqueConstraint(
-      #   fields=['contact', 'kind'],
-      #   name='django_ctct_unique_street_address',
-      # ),
-      # TODO: GH #8
-      # models.CheckConstraint(
-      #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
-      #   name='django_ctct_limit_street_addresses',
-      # ),
-    ]
+    # constraints = [
+    #    models.UniqueConstraint(  # TODO: GH #7
+    #      fields=['contact', 'kind'],
+    #      name='django_ctct_unique_street_address',
+    #    ),
+    #    models.CheckConstraint(   # TODO: GH #8
+    #      check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
+    #      name='django_ctct_limit_street_addresses',
+    #    ),
+    # ]
 
   def __str__(self) -> str:
     field_names = ['street', 'city', 'state']
@@ -632,8 +632,8 @@ class ContactCustomField(models.Model):
   """
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = ContactCustomFieldRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[ContactCustomFieldRemoteManager] = ContactCustomFieldRemoteManager()
 
   contact = models.ForeignKey(
     Contact,
@@ -657,18 +657,16 @@ class ContactCustomField(models.Model):
     verbose_name = _('Custom Field')
     verbose_name_plural = _('Custom Fields')
 
-    constraints = [
-      # TODO: GH #7
-      # models.UniqueConstraint(
-      #   fields=['contact', 'custom_field'],
-      #   name='django_ctct_unique_custom_field',
-      # ),
-      # TODO: GH #8
-      # models.CheckConstraint(
-      #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
-      #   name='django_ctct_limit_custom_fields',
-      # ),
-    ]
+    # constraints = [
+    #    models.UniqueConstraint(  # TODO: GH #7
+    #      fields=['contact', 'custom_field'],
+    #      name='django_ctct_unique_custom_field',
+    #    ),
+    #    models.CheckConstraint(   # TODO: GH #8
+    #      check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
+    #      name='django_ctct_limit_custom_fields',
+    #    ),
+    # ]
 
   def __str__(self) -> str:
     try:
@@ -682,8 +680,8 @@ class EmailCampaign(CTCTRemoteModel):
   """Django implementation of a CTCT EmailCampaign."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = EmailCampaignRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()
 
   STATUSES = (
     ('NONE', 'Processing'),
@@ -735,7 +733,8 @@ class EmailCampaign(CTCTRemoteModel):
   def clean_remote_scheduled_datetime(cls, data: dict) -> Optional[dt.datetime]:  # noqa: E501
     if scheduled_datetime := data.get('last_sent_date'):
       # Not sure why this ts_format is different
-      return to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')
+      scheduled_datetime = to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')  # noqa: E501
+    return scheduled_datetime
 
 
 class CampaignActivity(CTCTRemoteModel):
@@ -752,8 +751,8 @@ class CampaignActivity(CTCTRemoteModel):
   """
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = CampaignActivityRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()
 
   ROLES = (
     ('primary_email', 'Primary Email'),
@@ -921,8 +920,8 @@ class CampaignSummary(models.Model):
   """Django implementation of a CTCT EmailCampaign report."""
 
   # Must explicitly specify both
-  objects = models.Manager()
-  remote = CampaignSummaryRemoteManager()
+  objects: ClassVar[models.Manager] = models.Manager()
+  remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()
 
   campaign = models.OneToOneField(
     EmailCampaign,
