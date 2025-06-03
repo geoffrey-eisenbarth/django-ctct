@@ -1,6 +1,7 @@
 import datetime as dt
 import re
-from typing import ClassVar, Optional
+from typing import ClassVar, Optional, Any
+from typing_extensions import Self
 
 import jwt
 
@@ -14,6 +15,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ctct.utils import to_dt
 from django_ctct.managers import (
+  JsonDict,
   RemoteManager, TokenRemoteManager,
   ContactListRemoteManager, CustomFieldRemoteManager,
   ContactRemoteManager, ContactNoteRemoteManager,
@@ -38,7 +40,7 @@ class Token(Model):
   )
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[TokenRemoteManager] = TokenRemoteManager()
 
   access_token = models.TextField(
@@ -82,7 +84,7 @@ class Token(Model):
   def expires_at(self) -> dt.datetime:
     return self.created_at + dt.timedelta(seconds=self.expires_in)
 
-  def decode(self) -> dict:
+  def decode(self) -> JsonDict:
     """Decode JWT Token, which also verifies that it hasn't expired."""
 
     client = jwt.PyJWKClient(self.API_JWKS_URL)
@@ -93,6 +95,7 @@ class Token(Model):
       algorithms=['RS256'],
       audience=f'{RemoteManager.API_URL}{RemoteManager.API_VERSION}',
     )
+    assert isinstance(data, dict)
     return data
 
 
@@ -100,8 +103,8 @@ class CTCTModel(Model):
   """Common CTCT model methods and properties."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[RemoteManager] = RemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[RemoteManager[Self]] = RemoteManager()
 
   api_id = models.UUIDField(
     null=True,     # Allow objects to be created without CTCT IDs
@@ -114,8 +117,9 @@ class CTCTModel(Model):
     abstract = True
 
   @classmethod
-  def clean_remote_string(cls, field_name: str, data: dict) -> str:
+  def clean_remote_string(cls, field_name: str, data: JsonDict) -> str:
     s = data.get(field_name, '')
+    assert isinstance(s, str)
     s = s.replace('\n', ' ').replace('\t', ' ').strip()
     max_length = cls.remote.API_MAX_LENGTH[field_name]
     s = s[:max_length]
@@ -125,12 +129,12 @@ class CTCTModel(Model):
   def clean_remote_string_with_default(
     cls,
     field_name: str,
-    data: dict,
+    data: JsonDict,
     default: Optional[str] = None,
   ) -> Optional[str]:
     if default is None:
       field = cls._meta.get_field(field_name)
-      assert(hasattr(field, 'default'))
+      assert hasattr(field, 'default')
       if field.default is NOT_PROVIDED:
         message = _(
           f"Must provide a default value for {cls.__name__}.{field_name}."
@@ -142,6 +146,7 @@ class CTCTModel(Model):
     if field_name in data:
       # If ConstantContact sends a `None` value, we get the default value
       s = data[field_name] or default
+      assert isinstance(s, str)
     else:
       # A return value of `None` will remove the field from the cleaned dict
       s = None
@@ -151,10 +156,6 @@ class CTCTModel(Model):
 
 class CTCTRemoteModel(CTCTModel):
   """Django implementation of a CTCT model that has API endpoints."""
-
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[RemoteManager] = RemoteManager()
 
   # API read-only fields
   created_at = models.DateTimeField(
@@ -176,7 +177,7 @@ class ContactList(CTCTRemoteModel):
   """Django implementation of a CTCT Contact List."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()
 
   # API editable fields
@@ -208,7 +209,7 @@ class CustomField(CTCTRemoteModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[CustomFieldRemoteManager] = CustomFieldRemoteManager()
 
   TYPES = (
@@ -256,7 +257,7 @@ class Contact(CTCTRemoteModel):
   """
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()
 
   SALUTATIONS = (
@@ -361,7 +362,7 @@ class Contact(CTCTRemoteModel):
   )
 
   @property
-  def ctct_source(self) -> dict:
+  def ctct_source(self) -> dict[str, str]:
     if self.api_id:
       source = {'update_source': self.update_source}
     else:
@@ -383,24 +384,37 @@ class Contact(CTCTRemoteModel):
     return super().clean()
 
   @classmethod
-  def clean_remote_email(cls, data: dict) -> str:
-    return data['email_address']['address'].lower()
+  def clean_remote_email(cls, data: JsonDict) -> str:
+    assert isinstance(data['email_address'], dict)
+    s = data['email_address'].get('address', '')
+    assert isinstance(s, str)
+    return s.lower()
 
   @classmethod
-  def clean_remote_opt_out_source(cls, data: dict) -> str:
-    return data['email_address'].get('opt_out_source', '')
+  def clean_remote_opt_out_source(cls, data: JsonDict) -> str:
+    assert isinstance(data['email_address'], dict)
+    s = data['email_address'].get('opt_out_source', '')
+    assert isinstance(s, str)
+    return s
 
   @classmethod
-  def clean_remote_opt_out_date(cls, data: dict) -> Optional[dt.datetime]:
-    if opt_out_date := data['email_address'].get('opt_out_date'):
-      opt_out_date = to_dt(opt_out_date)
-    return opt_out_date
+  def clean_remote_opt_out_date(cls, data: JsonDict) -> Optional[dt.datetime]:
+    assert isinstance(data['email_address'], dict)
+    if opt_out_date := data['email_address'].get('opt_out_date', None):
+      assert isinstance(opt_out_date, str)
+      return to_dt(opt_out_date)
+    else:
+      assert opt_out_date is None
+      return opt_out_date
 
   @classmethod
-  def clean_remote_opt_out_reason(cls, data: dict) -> str:
-    return data['email_address'].get('opt_out_reason', '')
+  def clean_remote_opt_out_reason(cls, data: JsonDict) -> str:
+    assert isinstance(data['email_address'], dict)
+    s = data['email_address'].get('opt_out_reason', '')
+    assert isinstance(s, str)
+    return s
 
-  def serialize(self, data: dict) -> dict:
+  def serialize(self, data: JsonDict) -> JsonDict:
     data['email_address'] = {
       'address': self.email,
       'permission_to_send': self.permission_to_send,
@@ -413,7 +427,7 @@ class ContactNote(CTCTModel):
   """Django implementation of a CTCT Note."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactNoteRemoteManager] = ContactNoteRemoteManager()
 
   contact = models.ForeignKey(
@@ -467,8 +481,8 @@ class ContactPhoneNumber(CTCTModel):
   """Django implementation of a CTCT Contact's PhoneNumber."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[ContactPhoneNumberRemoteManager] = ContactPhoneNumberRemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[ContactPhoneNumberRemoteManager] = ContactPhoneNumberRemoteManager()  # noqa: E501
 
   MISSING_NUMBER = '000-000-0000'
   KINDS = (
@@ -517,21 +531,23 @@ class ContactPhoneNumber(CTCTModel):
     return f'[{self.get_kind_display()}] {self.phone_number}'
 
   @classmethod
-  def clean_remote_phone_number(cls, data: dict) -> str:
+  def clean_remote_phone_number(cls, data: JsonDict) -> str:
     numbers = r'\d+'
-    if phone_number := ''.join(re.findall(numbers, data['phone_number'])):
+    s = data.get('phone_number', '')
+    assert isinstance(s, str)
+    if s := ''.join(re.findall(numbers, s)):
       pass
     else:
-      phone_number = cls.MISSING_NUMBER
-    return phone_number
+      s = cls.MISSING_NUMBER
+    return s
 
 
 class ContactStreetAddress(CTCTModel):
   """Django implementation of a CTCT Contact's StreetAddress."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[ContactStreetAddressRemoteManager] = ContactStreetAddressRemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[ContactStreetAddressRemoteManager] = ContactStreetAddressRemoteManager()  # noqa: E501
 
   KINDS = (
     ('home', 'Home'),
@@ -602,23 +618,23 @@ class ContactStreetAddress(CTCTModel):
     return f'[{self.get_kind_display()}] {address}'
 
   @classmethod
-  def clean_remote_street(cls, data: dict) -> str:
+  def clean_remote_street(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('street', data)
 
   @classmethod
-  def clean_remote_city(cls, data: dict) -> str:
+  def clean_remote_city(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('city', data)
 
   @classmethod
-  def clean_remote_state(cls, data: dict) -> str:
+  def clean_remote_state(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('state', data)
 
   @classmethod
-  def clean_remote_postal_code(cls, data: dict) -> str:
+  def clean_remote_postal_code(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('postal_code', data)
 
   @classmethod
-  def clean_remote_country(cls, data: dict) -> str:
+  def clean_remote_country(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('country', data)
 
 
@@ -632,8 +648,8 @@ class ContactCustomField(models.Model):
   """
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[ContactCustomFieldRemoteManager] = ContactCustomFieldRemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[ContactCustomFieldRemoteManager] = ContactCustomFieldRemoteManager()  # noqa: E501
 
   contact = models.ForeignKey(
     Contact,
@@ -680,7 +696,7 @@ class EmailCampaign(CTCTRemoteModel):
   """Django implementation of a CTCT EmailCampaign."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()
 
   STATUSES = (
@@ -730,11 +746,14 @@ class EmailCampaign(CTCTRemoteModel):
     return self.name
 
   @classmethod
-  def clean_remote_scheduled_datetime(cls, data: dict) -> Optional[dt.datetime]:  # noqa: E501
-    if scheduled_datetime := data.get('last_sent_date'):
+  def clean_remote_scheduled_datetime(cls, data: JsonDict) -> Optional[dt.datetime]:  # noqa: E501
+    if last_sent_date := data.get('last_sent_date', None):
       # Not sure why this ts_format is different
-      scheduled_datetime = to_dt(scheduled_datetime, ts_format='%Y-%m-%dT%H:%M:%S.000Z')  # noqa: E501
-    return scheduled_datetime
+      assert isinstance(last_sent_date, str)
+      return to_dt(last_sent_date, ts_format='%Y-%m-%dT%H:%M:%S.000Z')
+    else:
+      assert last_sent_date is None
+      return last_sent_date
 
 
 class CampaignActivity(CTCTRemoteModel):
@@ -751,8 +770,8 @@ class CampaignActivity(CTCTRemoteModel):
   """
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()  # noqa: E501
 
   ROLES = (
     ('primary_email', 'Primary Email'),
@@ -857,7 +876,7 @@ class CampaignActivity(CTCTRemoteModel):
     ]
 
   @property
-  def physical_address_in_footer(self) -> Optional[dict]:
+  def physical_address_in_footer(self) -> Optional[dict[str, str]]:
     """Returns the company address for email footers.
 
     Notes
@@ -876,42 +895,46 @@ class CampaignActivity(CTCTRemoteModel):
       s = super().__str__()
     return s
 
-  def serialize(self, data: dict) -> dict:
+  def serialize(self, data: JsonDict) -> JsonDict:
     if 'contact_lists' in data:
       # Be careful to include data['contact_lists'] even if it's empty
       data['contact_list_ids'] = data.pop('contact_lists')
 
+    assert isinstance(data['html_content'], str)
     data['html_content'] = self.clean_html_content(data['html_content'])
     return data
 
   @classmethod
-  def clean_remote_from_name(cls, data: dict) -> Optional[str]:
+  def clean_remote_from_name(cls, data: JsonDict) -> Optional[str]:
     return cls.clean_remote_string_with_default('from_name', data)
 
   @classmethod
-  def clean_remote_from_email(cls, data: dict) -> Optional[str]:
+  def clean_remote_from_email(cls, data: JsonDict) -> Optional[str]:
     return cls.clean_remote_string_with_default('from_email', data)
 
   @classmethod
-  def clean_remote_reply_to_email(cls, data: dict) -> Optional[str]:
+  def clean_remote_reply_to_email(cls, data: JsonDict) -> Optional[str]:
     return cls.clean_remote_string_with_default('reply_to_email', data)
 
   @classmethod
-  def clean_remote_subject(cls, data: dict) -> Optional[str]:
+  def clean_remote_subject(cls, data: JsonDict) -> Optional[str]:
     """Pass a `default` here so it won't appear in admin forms."""
     default = cls.MISSING_SUBJECT
     return cls.clean_remote_string_with_default('subject', data, default)
 
   @classmethod
-  def clean_remote_contact_lists(cls, data: dict) -> list[str]:
-    return data.pop('contact_list_ids', [])
+  def clean_remote_contact_lists(cls, data: JsonDict) -> list[str]:
+    l = data.pop('contact_list_ids', [])  # noqa: E741
+    assert isinstance(l, list)
+    assert all([isinstance(i, str) for i in l])
+    return l
 
   def clean_html_content(self, html_content: str) -> str:
     if self.TRACKING_IMAGE not in html_content:
       html_content = self.TRACKING_IMAGE + '\n' + html_content
     return html_content
 
-  def save(self, *args, **kwargs) -> None:
+  def save(self, *args: Any, **kwargs: Any) -> None:
     self.html_content = self.clean_html_content(self.html_content)
     super().save(*args, **kwargs)
 
@@ -920,8 +943,8 @@ class CampaignSummary(models.Model):
   """Django implementation of a CTCT EmailCampaign report."""
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager] = models.Manager()
-  remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()  # noqa: E501
 
   campaign = models.OneToOneField(
     EmailCampaign,
@@ -987,37 +1010,41 @@ class CampaignSummary(models.Model):
     ordering = ('-campaign', )
 
   @classmethod
-  def clean_remote_counts(cls, field_name: str, data: dict) -> int:
-    return data.get('unique_counts', {}).get(field_name, 0)
+  def clean_remote_counts(cls, field_name: str, data: JsonDict) -> int:
+    counts = data.get('unique_counts', {})
+    assert isinstance(counts, dict)
+    i = counts.get(field_name, 0)
+    assert isinstance(i, int)
+    return i
 
   @classmethod
-  def clean_remote_sends(cls, data: dict) -> int:
+  def clean_remote_sends(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('sends', data)
 
   @classmethod
-  def clean_remote_opens(cls, data: dict) -> int:
+  def clean_remote_opens(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('opens', data)
 
   @classmethod
-  def clean_remote_clicks(cls, data: dict) -> int:
+  def clean_remote_clicks(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('clicks', data)
 
   @classmethod
-  def clean_remote_forwards(cls, data: dict) -> int:
+  def clean_remote_forwards(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('forwards', data)
 
   @classmethod
-  def clean_remote_optouts(cls, data: dict) -> int:
+  def clean_remote_optouts(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('optouts', data)
 
   @classmethod
-  def clean_remote_abuse(cls, data: dict) -> int:
+  def clean_remote_abuse(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('abuse', data)
 
   @classmethod
-  def clean_remote_bounces(cls, data: dict) -> int:
+  def clean_remote_bounces(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('bounces', data)
 
   @classmethod
-  def clean_remote_not_opened(cls, data: dict) -> int:
+  def clean_remote_not_opened(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('not_opened', data)

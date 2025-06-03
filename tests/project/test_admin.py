@@ -247,7 +247,7 @@ class ModelAdminTest(RequestsMockMixin, TestCRUDMixin, TestCase):
   def test_bulk_delete(self, token_decode: MagicMock):
     """Test bulk deletion in Django admin."""
 
-    if not hasattr(self.model.remote, 'API_ENDPOINT_BULK_DELETE'):
+    if self.model.remote.API_ENDPOINT_BULK_DELETE is None:
       # CTCT does not provide a bulk delete endpoint
       return
 

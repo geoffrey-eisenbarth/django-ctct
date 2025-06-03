@@ -141,7 +141,7 @@ class TestImportCommand(TestCase):
     model: Type[CTCTModel],
   ) -> dict:
     data = {
-      '_links': {},
+      # '_links': {},  # TODO: GH #3
       # This key is e.g. 'lists' or 'contacts', but we don't call it directly
       'data': self.data[model],
     }

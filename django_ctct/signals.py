@@ -1,4 +1,4 @@
-from typing import Type, Literal, cast
+from typing import Type, Literal, Any, cast
 
 from django.conf import settings
 from django.db.models import Model
@@ -8,7 +8,7 @@ from django_ctct.models import (
 )
 
 
-def remote_save(sender: Type[Model], instance: Model, **kwargs) -> None:
+def remote_save(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
   """Create or update the instance on CTCT servers."""
 
   if isinstance(instance, CTCTRemoteModel):
@@ -27,7 +27,7 @@ def remote_save(sender: Type[Model], instance: Model, **kwargs) -> None:
       task(obj=instance)
 
 
-def remote_delete(sender: Type[Model], instance: Model, **kwargs) -> None:
+def remote_delete(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
   """Delete the instance from CTCT servers."""
 
   if isinstance(instance, CTCTRemoteModel):
@@ -49,8 +49,8 @@ def remote_update_m2m(
   sender: Type[Model],
   instance: Model,
   action: Literal['pre_add', 'post_add', 'pre_remove', 'post_remove', 'pre_clear', 'post_clear'],  # noqa: E501
-  **kwargs,
-):
+  **kwargs: Any,
+) -> None:
   """Updates a Contact's list membership on CTCT servers."""
 
   actions = ['post_add', 'post_remove', 'post_clear']

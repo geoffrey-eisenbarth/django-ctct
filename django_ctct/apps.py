@@ -16,7 +16,7 @@ class CTCTConfig(AppConfig):
     'CTCT_FROM_EMAIL',
   ]
 
-  def ready(self):
+  def ready(self) -> None:
     # Validate that necessary settings have been defined
     for value in self.ctct_settings:
       if not hasattr(settings, value):
