@@ -47,7 +47,7 @@ class Command(BaseCommand):
     Contact,
     EmailCampaign,
     CampaignActivity,
-    # CampaignSummary,
+    # CampaignSummary,  # TODO: Implement CampaignSummary
   ]
 
   def get_id_to_pk(self, model: Type[CTCTModel]) -> dict[str, int]:
@@ -161,6 +161,9 @@ class Command(BaseCommand):
   ) -> None:
     """Sets Django pk values for ManyToMany and ReverseForeignKey objects."""
 
+    if not any(related_objs):
+      return
+
     _, m2ms, _, rfks = get_related_fields(model)
 
     m2m_attnames = {
@@ -169,28 +172,23 @@ class Command(BaseCommand):
       )
       for field in m2ms
     }
-    rfk_attnames = {
-      rel.related_model: rel.field.attname
-      for rel in rfks
-    }
-
-    if not (m2m_attnames | rfk_attnames):
-      assert any(related_objs) is False
-      return
-    # if model is not CustomField:
-    #   breakpoint()
-    # else:
-    #   assert any(related_objs) is True
-
     if m2ms:
       id_to_pk = {
         m2m.remote_field.through: self.get_id_to_pk(m2m.related_model)
         for m2m in m2ms
       }
 
+    if model is Contact:
+      m2m_attnames[ContactCustomField] = ('contact_id', 'custom_field_id')
+      id_to_pk[ContactCustomField] = self.get_id_to_pk(CustomField)
+
+    rfk_attnames = {
+      rel.related_model: rel.field.attname
+      for rel in rfks
+    }
+
     for obj_w_pk, related_objs in zip(objs_w_pks, related_objs):
       for related_model, related_obj_list in related_objs.items():
-
         if m2m_attname := m2m_attnames.get(related_model):
           column_name, reverse_name = m2m_attname
           for o in related_obj_list:
