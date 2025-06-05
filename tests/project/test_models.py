@@ -1,5 +1,5 @@
 from typing import Type, Generic
-from unittest import SkipTest
+import unittest
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
 
@@ -22,6 +22,7 @@ from django_ctct.signals import remote_save, remote_delete, remote_update_m2m
 from django_ctct.vendor import mute_signals
 
 from tests.factories import get_factory, TokenFactory
+
 
 
 class RequestsMockMixin(Generic[E]):
@@ -97,7 +98,9 @@ class RequestsMockMixin(Generic[E]):
     return data
 
 
-class TestCRUD(RequestsMockMixin[E], TestCase):
+class TestCRUD(RequestsMockMixin[E]):
+
+  __test__ = False
 
   model: Type[E]
 
@@ -148,7 +151,7 @@ class TestCRUD(RequestsMockMixin[E], TestCase):
     obj = self.create_obj(obj)
 
     # Verify API fields were added
-    self.assertIsNotNone(obj.api_id)
+    assert obj.api_id is not None
 
     # Verify the number of requests that were made
     if isinstance(obj, EmailCampaign) and obj.campaign_activities.filter(
@@ -160,7 +163,7 @@ class TestCRUD(RequestsMockMixin[E], TestCase):
     else:
       num_requests = 1
 
-    self.assertEqual(self.mock_api.call_count, num_requests)
+    assert self.mock_api.call_count == num_requests
 
   @patch('django_ctct.models.Token.decode')
   def test_update(self, token_decode: MagicMock) -> None:
@@ -208,10 +211,10 @@ class TestCRUD(RequestsMockMixin[E], TestCase):
 
     # Verify object was updated
     for field, value in other_obj_data.items():
-      self.assertEqual(getattr(obj, field), value)
+      assert getattr(obj, field) == value
 
     # Verify the number of requests that were made
-    self.assertEqual(self.mock_api.call_count, num_requests)
+    assert self.mock_api.call_count == num_requests
 
   @patch('django_ctct.models.Token.decode')
   def test_delete(self, token_decode: MagicMock) -> None:
@@ -229,18 +232,22 @@ class TestCRUD(RequestsMockMixin[E], TestCase):
     self.delete_obj(self.existing_obj)
 
     # Verify object was deleted
-    with self.assertRaises(self.model.DoesNotExist):
+    try:
       self.existing_obj.refresh_from_db()
+    except self.model.DoesNotExist:
+      pass
+    else:
+      raise AssertionError
 
     # Verify the number of requests that were made
-    self.assertEqual(self.mock_api.call_count, 1)
+    assert self.mock_api.call_count == 1
 
 
 @parameterized_class(
   ('model', ),
   [(ContactList, ), (CustomField, ), (Contact, ), (EmailCampaign, )],
 )
-class ModelTest(TestCRUD[E]):
+class ModelTest(TestCRUD[E], TestCase):
 
   model: Type[E]
 
@@ -249,7 +256,7 @@ class ModelTest(TestCRUD[E]):
     super().setUpClass()
     if cls is ModelTest:
       message = _("This is the unparameterized base class.")
-      raise SkipTest(message)
+      raise unittest.SkipTest(message)
 
   def create_obj(self, obj: E) -> E:
     """Create the object locally and remotely."""
