@@ -1,37 +1,26 @@
+from typing import Type, Generic, cast, Any
+
 import factory
 import factory.fuzzy
 from factory.django import DjangoModelFactory
 
 from django.contrib.auth import get_user_model
 
-from django_ctct import models as ctct_models
-from django_ctct.managers import TokenRemoteManager
+from django_ctct.models import (
+  CTCTModel, C, Token, ContactList, CustomField, Contact,
+  ContactNote, ContactPhoneNumber, ContactStreetAddress, ContactCustomField,
+  EmailCampaign, CampaignActivity, CampaignSummary,
+)
 
 
-def get_factory(
-  model: ctct_models.CTCTModel,
-  include_related: bool = False,
-) -> DjangoModelFactory:
-  if include_related:
-    factories = {
-      ctct_models.Contact: ContactWithRelatedObjsFactory,
-      ctct_models.ContactNote: ContactNoteWithRelatedObjsFactory,
-      ctct_models.EmailCampaign: EmailCampaignWithRelatedObjsFactory,
-    }
-  else:
-    factories = {
-      ctct_models.Token: TokenFactory,
-      ctct_models.ContactList: ContactListFactory,
-      ctct_models.CustomField: CustomFieldFactory,
-      ctct_models.Contact: ContactFactory,
-      ctct_models.ContactNote: ContactNoteFactory,
-      ctct_models.ContactPhoneNumber: ContactPhoneNumberFactory,
-      ctct_models.ContactStreetAddress: ContactStreetAddressFactory,
-      ctct_models.ContactCustomField: ContactCustomFieldFactory,
-      ctct_models.EmailCampaign: EmailCampaignFactory,
-      ctct_models.CampaignActivity: CampaignActivityFactory,
-    }
-  return factories[model]
+NUM_RELATED_OBJS: dict[Type[CTCTModel], int] = {
+  Contact: 2,
+  EmailCampaign: 1,
+}
+
+
+def get_factory(model: Type[C]) -> Type[DjangoModelFactory[C]]:
+  return cast(Type[DjangoModelFactory[C]], FACTORIES[model])
 
 
 class UserFactory(DjangoModelFactory):
@@ -45,39 +34,39 @@ class UserFactory(DjangoModelFactory):
   password = factory.django.Password('pw')
 
 
-class TokenFactory(DjangoModelFactory):
+class TokenFactory(DjangoModelFactory[Token]):
   class Meta:
-    model = ctct_models.Token
+    model = Token
 
   access_token = factory.Faker('pystr', max_chars=1200)
   refresh_token = factory.Faker('pystr', max_chars=50)
-  scope = TokenRemoteManager.API_SCOPE
+  scope = Token.API_SCOPE
 
 
-class CTCTModelFactory(DjangoModelFactory):
+class CTCTModelFactory(DjangoModelFactory[C], Generic[C]):
   api_id = factory.Faker('uuid4')
 
 
-class ContactListFactory(CTCTModelFactory):
+class ContactListFactory(CTCTModelFactory[ContactList]):
   class Meta:
-    model = ctct_models.ContactList
+    model = ContactList
 
   name = factory.Sequence(lambda n: f'Contact List {n}')
   description = factory.Faker('sentence')
   favorite = False
 
 
-class CustomFieldFactory(CTCTModelFactory):
+class CustomFieldFactory(CTCTModelFactory[CustomField]):
   class Meta:
-    model = ctct_models.CustomField
+    model = CustomField
 
   label = factory.Sequence(lambda n: f'Custom Field {n}')
   type = 'string'
 
 
-class ContactFactory(CTCTModelFactory):
+class ContactFactory(CTCTModelFactory[Contact]):
   class Meta:
-    model = ctct_models.Contact
+    model = Contact
 
   email = factory.Sequence(lambda n: f'contact{n}@example.com')
   first_name = factory.Faker('first_name')
@@ -86,9 +75,9 @@ class ContactFactory(CTCTModelFactory):
   company_name = factory.Faker('company')
 
 
-class ContactNoteFactory(CTCTModelFactory):
+class ContactNoteFactory(CTCTModelFactory[ContactNote]):
   class Meta:
-    model = ctct_models.ContactNote
+    model = ContactNote
 
   contact = factory.SubFactory(ContactFactory)
   content = factory.Faker('sentence')
@@ -98,24 +87,24 @@ class ContactNoteWithRelatedObjsFactory(ContactNoteFactory):
   author = factory.SubFactory(UserFactory)
 
 
-class ContactPhoneNumberFactory(CTCTModelFactory):
+class ContactPhoneNumberFactory(CTCTModelFactory[ContactPhoneNumber]):
   class Meta:
-    model = ctct_models.ContactPhoneNumber
+    model = ContactPhoneNumber
 
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
-    _[0] for _ in ctct_models.ContactPhoneNumber.KINDS
+    _[0] for _ in ContactPhoneNumber.KINDS
   )
   phone_number = factory.Faker('phone_number')
 
 
-class ContactStreetAddressFactory(CTCTModelFactory):
+class ContactStreetAddressFactory(CTCTModelFactory[ContactStreetAddress]):
   class Meta:
-    model = ctct_models.ContactStreetAddress
+    model = ContactStreetAddress
 
   contact = factory.SubFactory(ContactFactory)
   kind = factory.fuzzy.FuzzyChoice(
-    _[0] for _ in ctct_models.ContactStreetAddress.KINDS
+    _[0] for _ in ContactStreetAddress.KINDS
   )
   street = factory.Faker('street_address')
   city = factory.Faker('city')
@@ -124,9 +113,9 @@ class ContactStreetAddressFactory(CTCTModelFactory):
   country = factory.Faker('country')
 
 
-class ContactCustomFieldFactory(DjangoModelFactory):
+class ContactCustomFieldFactory(DjangoModelFactory[ContactCustomField]):
   class Meta:
-    model = ctct_models.ContactCustomField
+    model = ContactCustomField
 
   contact = factory.SubFactory(ContactFactory)
   custom_field = factory.SubFactory(CustomFieldFactory)
@@ -134,20 +123,21 @@ class ContactCustomFieldFactory(DjangoModelFactory):
 
 
 class ContactWithRelatedObjsFactory(ContactFactory):
+
   notes = factory.RelatedFactoryList(
     factory=ContactNoteFactory,
     factory_related_name='contact',
-    size=2,
+    size=NUM_RELATED_OBJS[Contact],
   )
   phone_numbers = factory.RelatedFactoryList(
     ContactPhoneNumberFactory,
     factory_related_name='contact',
-    size=2,
+    size=NUM_RELATED_OBJS[Contact],
   )
   street_addresses = factory.RelatedFactoryList(
     factory=ContactStreetAddressFactory,
     factory_related_name='contact',
-    size=2,
+    size=NUM_RELATED_OBJS[Contact],
   )
 
   @factory.post_generation
@@ -163,16 +153,16 @@ class ContactWithRelatedObjsFactory(ContactFactory):
     self.list_memberships.add(*extracted)
 
 
-class EmailCampaignFactory(CTCTModelFactory):
+class EmailCampaignFactory(CTCTModelFactory[EmailCampaign]):
   class Meta:
-    model = ctct_models.EmailCampaign
+    model = EmailCampaign
 
   name = factory.Sequence(lambda n: f'Email Campaign {n}')
 
 
-class CampaignActivityFactory(CTCTModelFactory):
+class CampaignActivityFactory(CTCTModelFactory[CampaignActivity]):
   class Meta:
-    model = ctct_models.CampaignActivity
+    model = CampaignActivity
 
   campaign = factory.SubFactory(EmailCampaignFactory)
   subject = factory.Faker('sentence')
@@ -189,9 +179,9 @@ class CampaignActivityFactory(CTCTModelFactory):
     self.contact_lists.add(*extracted)
 
 
-class CampaignSummaryFactory(DjangoModelFactory):
+class CampaignSummaryFactory(DjangoModelFactory[CampaignSummary]):
   class Meta:
-    model = ctct_models.CampaignSummary
+    model = CampaignSummary
 
   campaign = factory.SubFactory(EmailCampaignFactory)
 
@@ -206,12 +196,28 @@ class CampaignSummaryFactory(DjangoModelFactory):
 
 
 class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
+
   campaign_activities = factory.RelatedFactoryList(
     factory=CampaignActivityFactory,
     factory_related_name='campaign',
-    size=1,
+    size=NUM_RELATED_OBJS[EmailCampaign],
   )
   summary = factory.RelatedFactory(
     factory=CampaignSummaryFactory,
     factory_related_name='campaign',
   )
+
+
+FACTORIES: dict[Type[CTCTModel], Any] = {
+  Token: TokenFactory,
+  ContactList: ContactListFactory,
+  CustomField: CustomFieldFactory,
+  Contact: ContactWithRelatedObjsFactory,
+  ContactNote: ContactNoteWithRelatedObjsFactory,
+  ContactPhoneNumber: ContactPhoneNumberFactory,
+  ContactStreetAddress: ContactStreetAddressFactory,
+  ContactCustomField: ContactCustomFieldFactory,
+  EmailCampaign: EmailCampaignWithRelatedObjsFactory,
+  CampaignActivity: CampaignActivityFactory,
+  CampaignSummary: CampaignSummaryFactory,
+}

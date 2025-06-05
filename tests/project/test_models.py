@@ -1,32 +1,34 @@
+from typing import Type, Generic
 from unittest import SkipTest
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
 
-from factory.django import mute_signals
 from parameterized import parameterized_class
 import requests_mock
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.db.models import Model
 from django.test import TestCase
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  CTCTModel, CustomField,
-  ContactList, Contact, ContactCustomField, ContactNote,
+  JsonDict, E,
+  CustomField, ContactList,
+  Contact, ContactCustomField,
   EmailCampaign, CampaignActivity,
 )
 from django_ctct.signals import remote_save, remote_delete, remote_update_m2m
+from django_ctct.vendor import mute_signals
 
 from tests.factories import get_factory, TokenFactory
 
 
-class RequestsMockMixin:
+class RequestsMockMixin(Generic[E]):
 
-  model: CTCTModel
+  model: Type[E]
 
-  def setUp(self):
+  def setUp(self) -> None:
     # Set up mock API
     self.mock_api = requests_mock.Mocker()
     self.mock_api.start()
@@ -35,13 +37,12 @@ class RequestsMockMixin:
     TokenFactory.create()
 
     # Create an existing object
-    include_related = (self.model in [Contact, ContactNote, EmailCampaign])
-    self.factory = get_factory(self.model, include_related=include_related)
+    self.factory = get_factory(self.model)
 
     # Handle ManyToMany instances
     if self.model is Contact:
       self.custom_fields = get_factory(CustomField).create_batch(2)
-    if self.model in [Contact, EmailCampaign, CampaignActivity]:
+    if self.model in (Contact, EmailCampaign, CampaignActivity):
       self.existing_lists = get_factory(ContactList).create_batch(2)
       self.contact_lists = get_factory(ContactList).create_batch(2)
 
@@ -51,38 +52,39 @@ class RequestsMockMixin:
     ):
       self.existing_obj = self.factory.create()
 
-      if self.model is Contact:
+      if isinstance(self.existing_obj, Contact):
         self.existing_obj.list_memberships.set(self.existing_lists)
 
         for custom_field in self.custom_fields:
+          # TODO: get_factory expects Type[C], ContactCustomField is Type[M]
           get_factory(ContactCustomField).create(
             contact=self.existing_obj,
             custom_field=custom_field,
           )
 
-      if self.model is EmailCampaign:
+      elif isinstance(self.existing_obj, EmailCampaign):
         primary_email = self.existing_obj.campaign_activities.get()
         primary_email.contact_lists.set(self.existing_lists)
-      elif self.model is CampaignActivity:
+      elif isinstance(self.existing_obj, CampaignActivity):
         self.existing_obj.contact_lists.set(self.existing_lists)
 
-  def tearDown(self):
+  def tearDown(self) -> None:
     self.mock_api.stop()
 
-  def get_api_response(self, obj: CTCTModel) -> dict:
+  def get_api_response(self, obj: E) -> JsonDict:
     """Mock the API response dict."""
 
     # Serialize factory obj
-    data = self.model.remote.serialize(obj, field_types='all')
+    data = self.model.serializer.serialize(obj, field_types='all')
 
     # Set timestamps
-    ts_now = timezone.now().strftime(self.model.remote.TS_FORMAT)
+    ts_now = timezone.now().strftime(self.model.serializer.TS_FORMAT)
     for field in ['created_at', 'updated_at']:
       if data.get(field, False) is None:
         data[field] = ts_now
 
     # Set API ID
-    data[self.model.remote.API_ID_LABEL] = str(obj.api_id or uuid4())
+    data[self.model.API_ID_LABEL] = str(obj.api_id or uuid4())
 
     # Mock CTCT's creation of the primary email CampaignActivity
     if isinstance(obj, EmailCampaign) and obj.pk is None:
@@ -95,10 +97,27 @@ class RequestsMockMixin:
     return data
 
 
-class TestCRUDMixin:
+class TestCRUD(RequestsMockMixin[E], TestCase):
+
+  model: Type[E]
+
+  def create_obj(self, obj: E) -> E:
+    """Create the object locally and remotely."""
+    message = _("Must define `create_obj` on the inheriting class.")
+    raise ImproperlyConfigured(message)
+
+  def update_obj(self, obj: E) -> E:
+    """Create the object locally and remotely."""
+    message = _("Must define `update_obj` on the inheriting class.")
+    raise ImproperlyConfigured(message)
+
+  def delete_obj(self, obj: E) -> None:
+    """Create the object locally and remotely."""
+    message = _("Must define `delete_obj` on the inheriting class.")
+    raise ImproperlyConfigured(message)
 
   @patch('django_ctct.models.Token.decode')
-  def test_create(self, token_decode: MagicMock):
+  def test_create(self, token_decode: MagicMock) -> None:
     """Test object creation in Django."""
 
     token_decode.return_value = True
@@ -132,7 +151,7 @@ class TestCRUDMixin:
     self.assertIsNotNone(obj.api_id)
 
     # Verify the number of requests that were made
-    if (self.model is EmailCampaign) and obj.campaign_activities.filter(
+    if isinstance(obj, EmailCampaign) and obj.campaign_activities.filter(
       role='primary_email',
       contact_lists__isnull=False,
     ).exists():
@@ -144,7 +163,7 @@ class TestCRUDMixin:
     self.assertEqual(self.mock_api.call_count, num_requests)
 
   @patch('django_ctct.models.Token.decode')
-  def test_update(self, token_decode: MagicMock):
+  def test_update(self, token_decode: MagicMock) -> None:
     """Test object update in Django."""
 
     token_decode.return_value = True
@@ -152,7 +171,7 @@ class TestCRUDMixin:
     # Update some values (must be done before getting api_response)
     update_related = False  # TODO: GH #13
     other_obj = self.factory.build()
-    other_obj_data = self.model.remote.serialize(
+    other_obj_data = self.model.serializer.serialize(
       obj=other_obj,
       field_types='editable',
     )
@@ -195,7 +214,7 @@ class TestCRUDMixin:
     self.assertEqual(self.mock_api.call_count, num_requests)
 
   @patch('django_ctct.models.Token.decode')
-  def test_delete(self, token_decode: MagicMock):
+  def test_delete(self, token_decode: MagicMock) -> None:
     """Test object deletion in Django."""
 
     token_decode.return_value = True
@@ -217,16 +236,13 @@ class TestCRUDMixin:
     self.assertEqual(self.mock_api.call_count, 1)
 
 
-# TODO: Finish this (without signals) and close #10
-# TODO: test_models, test_admin, utils are for GH #4 #10
-# TODO: managers.py and signals.py seem to be GH #5?
 @parameterized_class(
   ('model', ),
   [(ContactList, ), (CustomField, ), (Contact, ), (EmailCampaign, )],
 )
-class ModelTest(RequestsMockMixin, TestCRUDMixin, TestCase):
+class ModelTest(TestCRUD[E]):
 
-  model: CTCTModel
+  model: Type[E]
 
   @classmethod
   def setUpClass(cls) -> None:
@@ -235,21 +251,21 @@ class ModelTest(RequestsMockMixin, TestCRUDMixin, TestCase):
       message = _("This is the unparameterized base class.")
       raise SkipTest(message)
 
-  def create_obj(self, obj: Model) -> Model:
+  def create_obj(self, obj: E) -> E:
     """Create the object locally and remotely."""
     obj.save()
     remote_save(self.model, obj)
     obj.refresh_from_db()
     return obj
 
-  def update_obj(self, obj: Model) -> Model:
+  def update_obj(self, obj: E) -> E:
     """Update the object locally and remotely."""
     obj.save()
     remote_save(self.model, obj)
     obj.refresh_from_db()
     return obj
 
-  def delete_obj(self, obj: Model) -> None:
+  def delete_obj(self, obj: E) -> None:
     """Delete the object locally and remotely."""
     obj.delete()
     remote_delete(self.model, obj)
@@ -259,11 +275,11 @@ class ModelTest(RequestsMockMixin, TestCRUDMixin, TestCase):
   ('model', ),
   [(Contact, ), (CampaignActivity, )],
 )
-class ManyToManyContactListTest(RequestsMockMixin, TestCase):
+class ManyToManyContactListTest(RequestsMockMixin[E], TestCase):
 
-  model: CTCTModel
+  model: Type[E]
 
-  def setUp(self):
+  def setUp(self) -> None:
     super().setUp()
 
     self.m2m_field_name = {
@@ -277,7 +293,7 @@ class ManyToManyContactListTest(RequestsMockMixin, TestCase):
     models.signals.m2m_changed.connect(remote_update_m2m)
 
   @patch('django_ctct.models.Token.decode')
-  def test_add_manytomany(self, token_decode: MagicMock):
+  def test_add_manytomany(self, token_decode: MagicMock) -> None:
 
     token_decode.return_value = True
 
@@ -296,7 +312,7 @@ class ManyToManyContactListTest(RequestsMockMixin, TestCase):
     self.assertEqual(self.mock_api.call_count, 1)
 
   @patch('django_ctct.models.Token.decode')
-  def test_remove_manytomany(self, token_decode: MagicMock):
+  def test_remove_manytomany(self, token_decode: MagicMock) -> None:
 
     token_decode.return_value = True
 
@@ -316,7 +332,7 @@ class ManyToManyContactListTest(RequestsMockMixin, TestCase):
     self.assertEqual(self.mock_api.call_count, 1)
 
   @patch('django_ctct.models.Token.decode')
-  def test_clear_manytomany(self, token_decode: MagicMock):
+  def test_clear_manytomany(self, token_decode: MagicMock) -> None:
 
     token_decode.return_value = True
 
