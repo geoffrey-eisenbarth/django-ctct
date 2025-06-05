@@ -1,8 +1,5 @@
 import functools
-from typing import (
-  Optional, Callable, Iterable, TypeVar, Generic, Union,
-  ParamSpec,
-)
+from typing import Optional, Callable, Iterable, Generic, Union, ParamSpec
 from requests.exceptions import HTTPError
 
 from django import forms
@@ -21,7 +18,7 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  CTCTRemoteModel, ContactList, CustomField,
+  CTCTEndpointModel, E, ContactList, CustomField,
   Contact,
   ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -30,8 +27,20 @@ from django_ctct.signals import remote_save, remote_delete
 from django_ctct.vendor import mute_signals
 
 
-_ModelT = TypeVar('_ModelT', bound='CTCTRemoteModel')
 P = ParamSpec('P')
+
+# TODO: Is there a way to simplify this?
+ContactInlineModel = Union[
+  ContactCustomField,
+  ContactPhoneNumber,
+  ContactStreetAddress,
+  ContactNote,
+]
+ContactInlineFormSet = BaseInlineFormSet[
+  ContactInlineModel,
+  Contact,
+  ModelForm[ContactInlineModel]
+]
 
 
 def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
@@ -71,7 +80,7 @@ class RemoteSyncMixin:
     description=_('Synced'),
     ordering='api_id',
   )
-  def is_synced(self, obj: CTCTRemoteModel) -> bool:
+  def is_synced(self, obj: CTCTEndpointModel) -> bool:
     return (obj.api_id is not None)
 
 
@@ -122,7 +131,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
 
 
 class RemoteModelAdmin(
-  RemoteSyncMixin, admin.ModelAdmin[_ModelT], Generic[_ModelT]
+  RemoteSyncMixin, admin.ModelAdmin[E], Generic[E]
 ):
   """Facilitate remote saving and deleting."""
 
@@ -143,7 +152,7 @@ class RemoteModelAdmin(
   def delete_queryset(
     self,
     request: HttpRequest,
-    queryset: QuerySet[CTCTRemoteModel],
+    queryset: QuerySet[CTCTEndpointModel],
   ) -> None:
     if self.remote_sync:
       queryset.model.remote.bulk_delete(queryset)
@@ -154,7 +163,7 @@ class RemoteModelAdmin(
   def save_related(
     self,
     request: HttpRequest,
-    form: ModelForm[CTCTRemoteModel],
+    form: ModelForm[CTCTEndpointModel],
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
@@ -177,7 +186,7 @@ class RemoteModelAdmin(
   def save_remotely(
     self,
     request: HttpRequest,
-    form: ModelForm[CTCTRemoteModel],
+    form: ModelForm[CTCTEndpointModel],
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
@@ -260,7 +269,7 @@ class ContactStreetAddressInline(
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_STREET_ADDRESSES
+  max_num = Contact.API_MAX_STREET_ADDRESSES
 
 
 class ContactPhoneNumberInline(
@@ -272,7 +281,7 @@ class ContactPhoneNumberInline(
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_PHONE_NUMBERS
+  max_num = Contact.API_MAX_PHONE_NUMBERS
 
 
 class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
@@ -282,7 +291,7 @@ class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
   fields = ('content', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_NOTES
+  max_num = Contact.API_MAX_NOTES
 
   def has_change_permission(
     self,
@@ -300,19 +309,6 @@ class ContactCustomFieldInline(
   excldue = ('api_id', )
 
   extra = 0
-
-
-ContactInlineModel = Union[
-  ContactCustomField,
-  ContactPhoneNumber,
-  ContactStreetAddress,
-  ContactNote,
-]
-ContactInlineFormSet = BaseInlineFormSet[
-  ContactInlineModel,
-  Contact,
-  ModelForm[ContactInlineModel]
-]
 
 
 class ContactAdmin(RemoteModelAdmin[Contact]):
@@ -387,7 +383,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     request: HttpRequest,
     obj: Optional[Contact] = None,
   ) -> list[str]:
-    readonly_fields = list(Contact.remote.API_READONLY_FIELDS)
+    readonly_fields = list(Contact.API_READONLY_FIELDS)
     if obj and obj.opt_out_source and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
@@ -533,9 +529,9 @@ class CampaignActivityInline(
     request: HttpRequest,
     obj: Optional[CampaignActivity] = None,
   ) -> list[str]:
-    readonly_fields = list(CampaignActivity.remote.API_READONLY_FIELDS)
+    readonly_fields = list(CampaignActivity.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
-      readonly_fields += list(CampaignActivity.remote.API_EDITABLE_FIELDS)
+      readonly_fields += list(CampaignActivity.API_EDITABLE_FIELDS)
     return readonly_fields
 
 
@@ -576,7 +572,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     request: HttpRequest,
     obj: Optional[EmailCampaign] = None,
   ) -> list[str]:
-    readonly_fields = list(EmailCampaign.remote.API_READONLY_FIELDS)
+    readonly_fields = list(EmailCampaign.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
       readonly_fields.append('scheduled_datetime')
     return readonly_fields
