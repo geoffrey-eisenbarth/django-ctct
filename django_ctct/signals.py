@@ -1,18 +1,20 @@
-from typing import Type, Literal, cast
+from typing import Type, Literal, Any, cast
 
 from django.conf import settings
 from django.db.models import Model
 
 from django_ctct.models import (
-  CTCTRemoteModel, Contact, ContactList, CampaignActivity
+  CTCTEndpointModel, Contact, ContactList, CampaignActivity
 )
 
 
-def remote_save(sender: Type[Model], instance: Model, **kwargs) -> None:
+def remote_save(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
   """Create or update the instance on CTCT servers."""
 
-  if isinstance(instance, CTCTRemoteModel):
-    sender = cast(Type[CTCTRemoteModel], sender)
+  if (
+    issubclass(sender, CTCTEndpointModel) and
+    isinstance(instance, CTCTEndpointModel)
+  ):
     sender.remote.connect()
 
     if instance.api_id:
@@ -27,11 +29,13 @@ def remote_save(sender: Type[Model], instance: Model, **kwargs) -> None:
       task(obj=instance)
 
 
-def remote_delete(sender: Type[Model], instance: Model, **kwargs) -> None:
+def remote_delete(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
   """Delete the instance from CTCT servers."""
 
-  if isinstance(instance, CTCTRemoteModel):
-    sender = cast(Type[CTCTRemoteModel], sender)
+  if (
+    issubclass(sender, CTCTEndpointModel) and
+    isinstance(instance, CTCTEndpointModel)
+  ):
     sender.remote.connect()
 
     task = sender.remote.delete
@@ -43,23 +47,22 @@ def remote_delete(sender: Type[Model], instance: Model, **kwargs) -> None:
       task(obj=instance)
 
 
-# TODO: Wait, since we're using PUT and specifing list_memberships, we should
-#       not be testing here. And probably shouldn't have a m2m_changed signal
+# TODO: GH #15
 def remote_update_m2m(
   sender: Type[Model],
   instance: Model,
   action: Literal['pre_add', 'post_add', 'pre_remove', 'post_remove', 'pre_clear', 'post_clear'],  # noqa: E501
-  **kwargs,
-):
+  **kwargs: Any,
+) -> None:
   """Updates a Contact's list membership on CTCT servers."""
 
-  actions = ['post_add', 'post_remove', 'post_clear']
-  senders = [
+  senders = (
     Contact.list_memberships.through,
     ContactList.members.through,
     CampaignActivity.contact_lists.through,
     ContactList.campaign_activities.through,
-  ]
+  )
+  actions = ['post_add', 'post_remove', 'post_clear']
 
   if (sender in senders) and (action in actions):
 
@@ -78,7 +81,7 @@ def remote_update_m2m(
       elif sender is ContactList.campaign_activities.through:
         raise NotImplementedError
 
-    model = cast(Type[CTCTRemoteModel], instance._meta.model)
+    model = cast(Type[CTCTEndpointModel], instance._meta.model)
     model.remote.connect()
 
     task = getattr(model.remote, task_name)

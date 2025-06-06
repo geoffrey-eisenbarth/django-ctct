@@ -1,6 +1,7 @@
 import functools
 import logging
 
+from django.dispatch import Signal
 
 logger = logging.getLogger('factory.generate')
 
@@ -48,7 +49,7 @@ class mute_signals:
         THE SOFTWARE.
     """
 
-    def __init__(self, *signals):
+    def __init__(self, *signals: Signal):
         self.signals = signals
         self.paused = {}
 

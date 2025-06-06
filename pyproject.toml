@@ -36,6 +36,9 @@ django-stubs = {extras = ["compatible-mypy"], version = "^5.1.3"}
 types-requests = "^2.32.0.20250306"
 django-stubs-ext = "^5.2.0"
 pre-commit = "^4.2.0"
+typing-extensions = "^4.13.2"
+types-ratelimit = "^2.2.0.20250501"
+types-factory-boy = "^0.4.1"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
@@ -47,6 +50,7 @@ show_missing = true
 python_version = "3.10"
 plugins = ["mypy_django_plugin.main"]
 ignore_missing_imports = true
+exclude = ["vendor.py", "factories.py", "tests/project/manage.py", "tests/project/project"]
 
 [tool.django-stubs]
 django_settings_module = "tests.project.project.settings"

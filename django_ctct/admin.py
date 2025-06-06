@@ -1,6 +1,5 @@
 import functools
-from typing import List, Optional
-
+from typing import TypeVar, ParamSpec, Generic, Optional, Callable, Iterable
 from requests.exceptions import HTTPError
 
 from django import forms
@@ -10,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import signals
 from django.db.models import Model, QuerySet, When, Case, F, FloatField
 from django.db.models.functions import Cast
-from django.forms import ModelForm
+from django.forms import ModelForm, BaseFormSet
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
 from django.urls import reverse
@@ -19,7 +18,7 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  CTCTRemoteModel, ContactList, CustomField,
+  CTCTEndpointModel, ContactList, CustomField,
   Contact,
   ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -28,19 +27,38 @@ from django_ctct.signals import remote_save, remote_delete
 from django_ctct.vendor import mute_signals
 
 
-def catch_api_errors(func):
-  """Decorator to catch HTTP errors from CTCT API."""
+P = ParamSpec('P')
+M = TypeVar('M', bound=Model)
+E = TypeVar('E', bound=CTCTEndpointModel)
+
+
+def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
+  """Decorator to catch HTTP errors from CTCT API.
+
+  Notes
+  -----
+  If the wrapped functioms (e.g., `save_related()` didn't return `None`, then
+  we would need to adjust the types above to `Callable[P, R]`, where R is
+  defined as TypeVar('R').
+
+  """
 
   @functools.wraps(func)
-  def wrapper(self, request, *args, **kwargs):
+  def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
     try:
-      return func(self, request, *args, **kwargs)
+      return func(*args, **kwargs)
     except HTTPError as e:
       if getattr(settings, 'CTCT_RAISE_FOR_API', False):
         raise e
       else:
-        message = format_html(_(f"ConstantContact: {e}"))
-        self.message_user(request, message, level=messages.ERROR)
+        self, request, *_ = args
+        assert isinstance(self, admin.ModelAdmin)
+        assert isinstance(request, HttpRequest)
+        self.message_user(
+          request=request,
+          message=format_html(_(f"ConstantContact: {e}")),
+          level=messages.ERROR,
+        )
 
   return wrapper
 
@@ -51,24 +69,36 @@ class RemoteSyncMixin:
     description=_('Synced'),
     ordering='api_id',
   )
-  def is_synced(self, obj: CTCTRemoteModel) -> bool:
+  def is_synced(self, obj: CTCTEndpointModel) -> bool:
     return (obj.api_id is not None)
 
 
-class ViewModelAdmin(admin.ModelAdmin):
+class ViewModelAdmin(admin.ModelAdmin[Model]):
   """Remove CRUD permissions."""
 
   actions = None
 
-  def has_add_permission(self, request: HttpRequest, obj=None) -> bool:
+  def has_add_permission(
+    self,
+    request: HttpRequest,
+    obj: Optional[Model] = None,
+  ) -> bool:
     """Prevent creation in the Django admin."""
     return False
 
-  def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+  def has_change_permission(
+    self,
+    request: HttpRequest,
+    obj: Optional[Model] = None,
+  ) -> bool:
     """Prevent updates in the Django admin."""
     return False
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None) -> tuple:
+  def get_readonly_fields(
+    self,
+    request: HttpRequest,
+    obj: Optional[Model] = None,
+  ) -> tuple[str, ...]:
     """Prevent updates in the Django admin."""
     if obj is not None:
       readonly_fields = tuple(
@@ -80,12 +110,18 @@ class ViewModelAdmin(admin.ModelAdmin):
       readonly_fields = tuple()
     return readonly_fields
 
-  def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+  def has_delete_permission(
+    self,
+    request: HttpRequest,
+    obj: Optional[Model] = None,
+  ) -> bool:
     """Allow superusers to delete objects."""
     return request.user.is_superuser
 
 
-class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
+class RemoteModelAdmin(
+  RemoteSyncMixin, admin.ModelAdmin[E], Generic[E]
+):
   """Facilitate remote saving and deleting."""
 
   # ChangeView
@@ -96,20 +132,30 @@ class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
     return sync_admin and not sync_signals
 
   @catch_api_errors
-  def delete_model(self, request: HttpRequest, obj: Model):
+  def delete_model(self, request: HttpRequest, obj: Model) -> None:
     obj.delete()
     if self.remote_sync:
       remote_delete(sender=self.model, instance=obj)
 
   @catch_api_errors
-  def delete_queryset(self, request: HttpRequest, queryset: QuerySet):
+  def delete_queryset(
+    self,
+    request: HttpRequest,
+    queryset: QuerySet[CTCTEndpointModel],
+  ) -> None:
     if self.remote_sync:
       queryset.model.remote.bulk_delete(queryset)
     with mute_signals(signals.pre_delete):
       queryset.delete()
 
   @catch_api_errors
-  def save_related(self, request: HttpRequest, form, formsets, change):
+  def save_related(
+    self,
+    request: HttpRequest,
+    form: ModelForm[CTCTEndpointModel],
+    formsets: list[BaseFormSet[ModelForm[Model]]],
+    change: bool,
+  ) -> None:
     """Default implementation with an added line for saving remotely.
 
     Notes
@@ -126,7 +172,13 @@ class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
     self.save_remotely(request, form, formsets, change)
 
   @catch_api_errors
-  def save_remotely(self, request, form, formsets, change):
+  def save_remotely(
+    self,
+    request: HttpRequest,
+    form: ModelForm[CTCTEndpointModel],
+    formsets: list[BaseFormSet[ModelForm[Model]]],
+    change: bool,
+  ) -> None:
     if self.remote_sync:
       # Remote save the primary object after related objects have been saved
       remote_save(
@@ -136,7 +188,7 @@ class RemoteModelAdmin(RemoteSyncMixin, admin.ModelAdmin):
       )
 
 
-class ContactListForm(forms.ModelForm):
+class ContactListForm(forms.ModelForm[ContactList]):
   """Custom widget choices for ContactList admin."""
 
   class Meta:
@@ -147,7 +199,7 @@ class ContactListForm(forms.ModelForm):
     fields = '__all__'
 
 
-class ContactListAdmin(RemoteModelAdmin):
+class ContactListAdmin(RemoteModelAdmin[ContactList]):
   """Admin functionality for CTCT ContactLists."""
 
   # ListView
@@ -181,7 +233,7 @@ class ContactListAdmin(RemoteModelAdmin):
   )
 
 
-class CustomFieldAdmin(RemoteModelAdmin):
+class CustomFieldAdmin(RemoteModelAdmin[CustomField]):
   """Admin functionality for CTCT CustomFields."""
 
   # ListView
@@ -197,44 +249,50 @@ class CustomFieldAdmin(RemoteModelAdmin):
   exclude = ('api_id', )
 
 
-class ContactStreetAddressInline(admin.StackedInline):
+class ContactStreetAddressInline(
+  admin.StackedInline[ContactStreetAddress, Contact]
+):
   """Inline for adding ContactStreetAddresses to a Contact."""
 
   model = ContactStreetAddress
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_STREET_ADDRESSES
+  max_num = Contact.API_MAX_NUM['street_addresses']
 
 
-class ContactPhoneNumberInline(admin.TabularInline):
+class ContactPhoneNumberInline(
+  admin.TabularInline[ContactPhoneNumber, Contact]
+):
   """Inline for adding ContactPhoneNumbers to a Contact."""
 
   model = ContactPhoneNumber
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_PHONE_NUMBERS
+  max_num = Contact.API_MAX_NUM['phone_numbers']
 
 
-class ContactNoteInline(admin.TabularInline):
+class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
   """Inline for adding ContactNotes to a Contact."""
 
   model = ContactNote
   fields = ('content', )
 
   extra = 0
-  max_num = Contact.remote.API_MAX_NOTES
+  max_num = Contact.API_MAX_NUM['notes']
 
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Optional[ContactNote] = None,
+    obj: Optional[Contact] = None,  # type: ignore[override]
   ) -> bool:
     return False
 
 
-class ContactCustomFieldInline(admin.TabularInline):
+class ContactCustomFieldInline(
+  admin.TabularInline[ContactCustomField, Contact]
+):
 
   model = ContactCustomField
   excldue = ('api_id', )
@@ -242,7 +300,7 @@ class ContactCustomFieldInline(admin.TabularInline):
   extra = 0
 
 
-class ContactAdmin(RemoteModelAdmin):
+class ContactAdmin(RemoteModelAdmin[Contact]):
   """Admin functionality for CTCT Contacts."""
 
   # ListView
@@ -313,8 +371,8 @@ class ContactAdmin(RemoteModelAdmin):
     self,
     request: HttpRequest,
     obj: Optional[Contact] = None,
-  ) -> List[str]:
-    readonly_fields = list(Contact.remote.API_READONLY_FIELDS)
+  ) -> list[str]:
+    readonly_fields = list(Contact.API_READONLY_FIELDS)
     if obj and obj.opt_out_source and not request.user.is_superuser:
       readonly_fields.append('list_memberships')
     return readonly_fields
@@ -322,8 +380,8 @@ class ContactAdmin(RemoteModelAdmin):
   def save_formset(
     self,
     request: HttpRequest,
-    form: ModelForm,
-    formset: BaseInlineFormSet,
+    form: ModelForm[Contact],
+    formset: BaseInlineFormSet[M, Contact, ModelForm[M]],
     change: bool,
   ) -> None:
     """Set the current user as ContactNote author.
@@ -354,13 +412,22 @@ class ContactNoteAuthorFilter(admin.SimpleListFilter):
   title = _('Author')
   parameter_name = 'author'
 
-  def lookups(self, request, model_admin):
+  def lookups(
+    self,
+    request: HttpRequest,
+    model_admin: admin.ModelAdmin[Model],
+  ) -> Optional[Iterable[tuple[str, str]]]:
     authors = get_user_model().objects.exclude(notes__isnull=True)
-    return [(obj.id, str(obj)) for obj in authors]
+    return [(str(obj.id), str(obj)) for obj in authors]
 
-  def queryset(self, request, queryset):
-    if self.value():
-      queryset = queryset.filter(author_id=self.value())
+  def queryset(
+    self,
+    request: HttpRequest,
+    queryset: QuerySet[ContactNote],
+  ) -> QuerySet[ContactNote]:
+    author_id = self.value()
+    if author_id is not None and author_id.isdigit():
+      queryset = queryset.filter(author_id=int(author_id))
     return queryset
 
 
@@ -403,12 +470,16 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
     html = format_html('<a href="{}">{}</a>', url, obj.contact)
     return html
 
-  def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+  def has_delete_permission(
+    self,
+    request: HttpRequest,
+    obj: Optional[Model] = None,
+  ) -> bool:
     """Allow superusers to delete Notes."""
     return request.user.is_superuser
 
 
-class CampaignActivityInlineForm(forms.ModelForm):
+class CampaignActivityInlineForm(forms.ModelForm[CampaignActivity]):
   """Custom widget choices for ContactList admin."""
 
   html_content = forms.CharField(
@@ -421,7 +492,9 @@ class CampaignActivityInlineForm(forms.ModelForm):
     fields = '__all__'
 
 
-class CampaignActivityInline(admin.StackedInline):
+class CampaignActivityInline(
+  admin.StackedInline[CampaignActivity, EmailCampaign]
+):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
@@ -440,14 +513,18 @@ class CampaignActivityInline(admin.StackedInline):
   extra = 1
   max_num = 1
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None) -> list[str]:
-    readonly_fields = list(CampaignActivity.remote.API_READONLY_FIELDS)
+  def get_readonly_fields(
+    self,
+    request: HttpRequest,
+    obj: Optional[CampaignActivity] = None,
+  ) -> list[str]:
+    readonly_fields = list(CampaignActivity.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
-      readonly_fields += list(CampaignActivity.remote.API_EDITABLE_FIELDS)
+      readonly_fields += list(CampaignActivity.API_EDITABLE_FIELDS)
     return readonly_fields
 
 
-class EmailCampaignAdmin(RemoteModelAdmin):
+class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
   """Admin functionality for CTCT EmailCampaigns.
 
   Notes
@@ -479,14 +556,24 @@ class EmailCampaignAdmin(RemoteModelAdmin):
   )
   inlines = (CampaignActivityInline, )
 
-  def get_readonly_fields(self, request: HttpRequest, obj=None) -> list[str]:
-    readonly_fields = list(EmailCampaign.remote.API_READONLY_FIELDS)
+  def get_readonly_fields(
+    self,
+    request: HttpRequest,
+    obj: Optional[EmailCampaign] = None,
+  ) -> list[str]:
+    readonly_fields = list(EmailCampaign.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
       readonly_fields.append('scheduled_datetime')
     return readonly_fields
 
   @catch_api_errors
-  def save_remotely(self, request, form, formsets, change) -> None:
+  def save_remotely(
+    self,
+    request: HttpRequest,
+    form: ModelForm[EmailCampaign],  # type: ignore[override]
+    formsets: list[BaseFormSet[ModelForm[Model]]],
+    change: bool,
+  ) -> None:
     if self.remote_sync:
 
       campaign = form.instance
@@ -519,7 +606,13 @@ class EmailCampaignAdmin(RemoteModelAdmin):
         # Inform the user
         self.ctct_message_user(request, form, formsets, change)
 
-  def ctct_message_user(self, request, form, formsets, change) -> None:
+  def ctct_message_user(
+    self,
+    request: HttpRequest,
+    form: ModelForm[EmailCampaign],
+    formsets: list[BaseFormSet[ModelForm[Model]]],
+    change: bool,
+  ) -> None:
     """Inform the user of API actions."""
 
     campaign = form.instance
@@ -567,7 +660,7 @@ class CampaignSummaryAdmin(ViewModelAdmin):
     'abuse',
   )
 
-  def get_queryset(self, request):
+  def get_queryset(self, request: HttpRequest) -> QuerySet[Model]:
     qs = super().get_queryset(request)
     qs = qs.annotate(
       open_rate=Case(

@@ -1,22 +1,28 @@
 from functools import partial
 from math import ceil
 import random
-from typing import Type, Optional
+from typing import Type, TypeVar, Optional, Iterable, cast
 from unittest.mock import patch, MagicMock
 from urllib.parse import urlencode
 
-from factory.django import mute_signals
 import requests_mock
 
 from django.core.management import call_command
+from django.db.models import Model
 from django.db.models.signals import post_save, pre_delete, m2m_changed
 from django.test import TestCase
 
+from django_ctct.vendor import mute_signals
 from django_ctct.models import (
-  CTCTModel, ContactList, CustomField, Contact, ContactCustomField,
+  JsonDict,
+  CTCTModel, CTCTEndpointModel, ContactList, CustomField, Contact,
+  ContactNote, ContactPhoneNumber, ContactStreetAddress, ContactCustomField,
   EmailCampaign, CampaignActivity, CampaignSummary,
 )
-from tests.factories import get_factory, TokenFactory
+from tests.factories import get_factory, TokenFactory, NUM_RELATED_OBJS
+
+
+E = TypeVar('E', bound=CTCTEndpointModel)
 
 
 class TestImportCommand(TestCase):
@@ -30,11 +36,11 @@ class TestImportCommand(TestCase):
 
   """
 
-  models = [
+  models: list[Type[CTCTEndpointModel]] = [
     ContactList, CustomField, Contact,
     EmailCampaign, CampaignActivity, CampaignSummary,
   ]
-  num_objs = {
+  num_objs: dict[Type[CTCTEndpointModel], int] = {
     ContactList: 50,
     CustomField: 2,
     Contact: 50,
@@ -42,7 +48,7 @@ class TestImportCommand(TestCase):
     CampaignActivity: 50,
     CampaignSummary: 50,
   }
-  per_request = {
+  per_request: dict[Type[CTCTEndpointModel], int] = {
     ContactList: 50,         # limit in [1, 1000]
     CustomField: 50,         # limit in [1, 100]
     Contact: 50,             # limit in [1, 500]
@@ -51,7 +57,7 @@ class TestImportCommand(TestCase):
     CampaignSummary: 50,     # Same as EmailCampaign
   }
 
-  def setUp(self):
+  def setUp(self) -> None:
     # Set up mock API
     self.mock_api = requests_mock.Mocker()
     self.mock_api.start()
@@ -61,65 +67,58 @@ class TestImportCommand(TestCase):
     # Set up mock Token
     TokenFactory.create()
 
-  def tearDown(self):
+  def tearDown(self) -> None:
     self.mock_api.stop()
 
   def create_responses(self) -> None:
-    self.objects = {}
-    self.data = {}
+    self.data: dict[Type[CTCTEndpointModel], list[JsonDict]] = {}
+    instances: dict[Type[CTCTEndpointModel], list[CTCTModel]] = {}
+    objs: Iterable[Model]
 
     with mute_signals(post_save, pre_delete, m2m_changed):
 
-      # Create ContactLists and CustomFields first
-      lists = get_factory(ContactList).create_batch(
-        self.num_objs[ContactList]
-      )
-      custom_fields = get_factory(CustomField).create_batch(
-        self.num_objs[CustomField]
-      )
-      contacts = get_factory(Contact, include_related=True).create_batch(
-        self.num_objs[Contact]
-      )
+      for model, num_objs in self.num_objs.items():
+        if model is CampaignActivity:
+          # These were already created with EmailCampaignFactory
+          objs = CampaignActivity.objects.filter(role='primary_email')
+        elif model is CampaignSummary:
+          # These were already created with EmailCampaignFactory
+          objs = CampaignSummary.objects.all()
+        else:
+          # Create new instances
+          objs = get_factory(model).create_batch(num_objs)
 
-      # Set ManyToMany relationships
-      for contact in contacts:
-        count = random.randint(1, 10)
-        contact.list_memberships.set(random.sample(lists, count))
+        instances[model] = cast(list[CTCTModel], objs)
 
-        factory = get_factory(ContactCustomField)
-        for custom_field in custom_fields:
-          factory(contact=contact, custom_field=custom_field)
+        if model is Contact:
+          # Set ManyToMany relationships
+          for contact in objs:
+            memberships = cast(
+              list[ContactList],
+              random.sample(instances[ContactList], random.randint(1, 10))
+            )
+            cast(Contact, contact).list_memberships.set(memberships)
 
-      # Create EmailCampaigns and CampaignActivities
-      campaigns = get_factory(
-        EmailCampaign,
-        include_related=True
-      ).create_batch(
-        self.num_objs[EmailCampaign]
-      )
-      activities = CampaignActivity.objects.filter(role='primary_email')
-      summaries = CampaignSummary.objects.all()
+            for custom_field in instances[CustomField]:
+              get_factory(ContactCustomField).create(
+                contact=contact,
+                custom_field=custom_field,
+              )
 
       # Serialize instances
-      # Must do EmailCampaigns before CampaignActivity.contact_lists can be set
-      self.objects = {
-        ContactList: lists,
-        CustomField: custom_fields,
-        Contact: contacts,
-        EmailCampaign: campaigns,
-        CampaignActivity: activities,
-        CampaignSummary: summaries,
-      }
-      for model, objects in self.objects.items():
+      for model, objs in instances.items():
         if model is CampaignActivity:
           # Since EmailCampaign has been stored, we can now set contact_lists
-          for obj in objects:
-            count = random.randint(1, 10)
-            obj.contact_lists.set(random.sample(lists, count))
+          for obj in objs:
+            recipients = cast(
+              list[ContactList],
+              random.sample(instances[ContactList], random.randint(1, 10))
+            )
+            cast(CampaignActivity, obj).contact_lists.set(recipients)
 
         # Serialize and store
-        serializer = partial(model.remote.serialize, field_types='all')
-        self.data[model] = list(map(serializer, objects))
+        serializer = partial(model.serializer.serialize, field_types='all')
+        self.data[model] = list(map(serializer, objs))
 
       # Delete objects
       for model in self.models:
@@ -127,21 +126,21 @@ class TestImportCommand(TestCase):
 
   def get_api_url(
     self,
-    model: Type[CTCTModel],
+    model: Type[E],
     api_id: Optional[str] = None,
   ) -> str:
     url = model.remote.get_url(api_id=api_id)
-    if params := model.remote.API_GET_QUERIES:
+    if params := model.API_GET_QUERIES:
       # Important: do not include a forward slash before the params
       url = f'{url}?{urlencode(params)}'
     return url
 
   def get_api_response(
     self,
-    model: Type[CTCTModel],
-  ) -> dict:
+    model: Type[E],
+  ) -> dict[str, list[JsonDict]]:
     data = {
-      '_links': {},
+      # '_links': {},  # TODO: GH #3
       # This key is e.g. 'lists' or 'contacts', but we don't call it directly
       'data': self.data[model],
     }
@@ -162,7 +161,7 @@ class TestImportCommand(TestCase):
     for model in self.models:
       if model is EmailCampaign:
         # Set up single, detailed endpoint first
-        id_label = EmailCampaign.remote.API_ID_LABEL
+        id_label = EmailCampaign.API_ID_LABEL
         for datum in self.data[EmailCampaign]:
           self.mock_api.get(
             url=self.get_api_url(EmailCampaign, api_id=datum[id_label]),
@@ -181,7 +180,7 @@ class TestImportCommand(TestCase):
         )
       elif model is CampaignActivity:
         # No bulk GET, must request each CampaignActivity individually
-        id_label = CampaignActivity.remote.API_ID_LABEL
+        id_label = CampaignActivity.API_ID_LABEL
         for datum in self.data[CampaignActivity]:
           self.mock_api.get(
             url=self.get_api_url(CampaignActivity, api_id=datum[id_label]),
@@ -212,14 +211,19 @@ class TestImportCommand(TestCase):
     for model in self.models:
       self.assertEqual(model.objects.count(), self.num_objs[model])
       if model is Contact:
+        # Verify though model object creation
+        self.assertTrue(
+          Contact.list_memberships.through.objects.exists()
+        )
+
         # Verify related object creation
-        RELATED_OBJ_COUNT = 2
-        for field in Contact._meta.get_fields():
-          if field.many_to_many:
-            through_model = field.remote_field.through
-            self.assertTrue(through_model.objects.exists())
-          elif field.related_model is not None:
-            self.assertEqual(
-              field.related_model.objects.count(),
-              self.num_objs[Contact] * RELATED_OBJ_COUNT
-            )
+        related_models: list[Type[CTCTModel]] = [
+          ContactNote,
+          ContactPhoneNumber,
+          ContactStreetAddress,
+        ]
+        for related_model in related_models:
+          self.assertEqual(
+            related_model.objects.count(),
+            self.num_objs[Contact] * NUM_RELATED_OBJS[Contact]
+          )
