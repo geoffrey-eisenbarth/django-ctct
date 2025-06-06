@@ -28,12 +28,6 @@ from django_ctct.managers import (
 )
 
 
-# JsonType = Union[
-#   str, int,
-#   list[str], list[int],
-#   dict[str, 'JsonType'], list['JsonType'],
-# ]
-# JsonDict = dict[str, JsonType]
 JsonDict = dict[str, Any]
 
 
@@ -403,12 +397,13 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     'opt_out_reason': 255,
   }
 
-  # TODO: Collapse these?
-  API_MAX_NOTES: int = 150
-  API_MAX_PHONE_NUMBERS: int = 3
-  API_MAX_STREET_ADDRESSES: int = 3
-  API_MAX_CUSTOM_FIELDS: int = 25
-  API_MAX_LIST_MEMBERSHIPS: int = 50
+  API_MAX_NUM = {
+    'notes': 150,
+    'phone_numbers': 3,
+    'street_addresses': 3,
+    'custom_fields': 25,
+    'list_memberships': 50,
+  }
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
@@ -620,8 +615,8 @@ class ContactNote(CreatedAtMixin, CTCTModel):
     # TODO: GH #8
     # constraints = [
     #   models.CheckConstraint(
-    #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NOTES),
-    #     name='django_ctct_limit_notes'
+    #     check=Q(contact__notes__count__lte=ContactRemoteManager.API_MAX_NUM['notes']),
+    #     name='django_ctct_limit_notes',
     #   ),
     # ]
 
@@ -686,7 +681,7 @@ class ContactPhoneNumber(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     #      name='django_ctct_unique_phone_number',
     #    ),
     #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_PHONE_NUMBERS),
+    #      check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_NUM['phone_numbers'])
     #      name='django_ctct_limit_phone_numbers',
     #    ),
     # ]
@@ -787,7 +782,7 @@ class ContactStreetAddress(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     #      name='django_ctct_unique_street_address',
     #    ),
     #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_STREET_ADDRESSES),
+    #      check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_NUM['street_addresses']),
     #      name='django_ctct_limit_street_addresses',
     #    ),
     # ]
@@ -820,7 +815,7 @@ class ContactStreetAddress(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     return cls.clean_remote_string('country', data)
 
 
-# TODO: Does this need to be a CTCTModel? It doesn't have api_id
+# TODO: GH #14
 class ContactCustomField(models.Model):
   """Django implementation of a CTCT Contact's CustomField.
 
@@ -866,7 +861,7 @@ class ContactCustomField(models.Model):
     #      name='django_ctct_unique_custom_field',
     #    ),
     #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_CUSTOM_FIELDS),
+    #      check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_NUM['custom_fields']),
     #      name='django_ctct_limit_custom_fields',
     #    ),
     # ]
@@ -1176,7 +1171,7 @@ class CampaignActivity(CTCTEndpointModel):
     super().save(*args, **kwargs)
 
 
-# TODO: Set api_id to campaign_id
+# TODO Set api_id to campaign_id
 class CampaignSummary(CTCTEndpointModel):
   """Django implementation of a CTCT EmailCampaign report."""
 

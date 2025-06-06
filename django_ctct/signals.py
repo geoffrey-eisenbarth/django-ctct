@@ -47,8 +47,7 @@ def remote_delete(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
       task(obj=instance)
 
 
-# TODO: Wait, since we're using PUT and specifing list_memberships, we should
-#       not be testing here. And probably shouldn't have a m2m_changed signal
+# TODO: GH #15
 def remote_update_m2m(
   sender: Type[Model],
   instance: Model,

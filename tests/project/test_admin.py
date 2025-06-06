@@ -109,8 +109,8 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       else:
         # Include new data for related object
         related_obj_factory = get_factory(inline_admin.model)
-        # TODO: inline.admin is of type CTCTModel, can't be ContactCustomField
-        # TODO: how does this play into serializer?
+        # TODO inline.admin is of type CTCTModel, can't be ContactCustomField
+        # TODO how does this play into serializer?
         if inline_admin.model is ContactCustomField:
           # We want to re-use existing CustomFields
           related_objs = [
@@ -128,7 +128,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
         for i, related_obj in enumerate(related_objs):
           if inline_admin.model is ContactCustomField:
-            # TODO: ContactCustomField has no serializer (no api_id)
+            # TODO ContactCustomField has no serializer (no api_id)
             # Use Django PKs not API ids
             data = {
               'custom_field': related_obj.custom_field.pk,

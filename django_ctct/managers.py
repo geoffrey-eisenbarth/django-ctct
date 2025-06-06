@@ -37,7 +37,7 @@ if TYPE_CHECKING:
   )
 
 
-# TODO: How to make this accept Token too?
+# TODO How to make this accept Token too?
 class ConnectionManagerMixin(Manager['E']):
   """Manager mixin for utilizing an API."""
 
@@ -190,7 +190,7 @@ class Serializer(Manager['C']):
   ) -> JsonDict:
     """Convert from Django object to API request body."""
 
-    # TODO: is this import bad?
+    # TODO is this import bad?
     from django_ctct.models import CTCTModel, ContactCustomField
     data: JsonDict = {}
 
@@ -227,9 +227,7 @@ class Serializer(Manager['C']):
       elif isinstance(getattr(self.model, field_name, None), property):
         # The API field was defined as a @property
         data[field_name] = value
-      elif isinstance(value, Model):
-        # TODO: ?
-        breakpoint()
+      elif isinstance(value, Model):  # TODO ?
         raise NotImplementedError
         # isinstance(getattr(value, 'remote', None), RemoteManager):
         # data[field_name] = type(value).serializer.serialize(
@@ -343,12 +341,12 @@ class Serializer(Manager['C']):
   ) -> tuple[C, list[RelatedObjects]]:
     """Convert from API response body to Django object."""
 
-    # TODO: is this import bad?
+    # TODO is this import bad?
     from django_ctct.models import CampaignSummary
 
     data = data.copy()
     if issubclass(self.model, CampaignSummary):
-      # TODO: Figure this out. Should we set API_ID_LABEL = 'campaign_id'?
+      # TODO Figure this out. Should we set API_ID_LABEL = 'campaign_id'?
       #       If we 'pop' the value, do we want the OneToOneField? Should
       #       we re-set the value in .save()? What if .save() doesn't get
       #       called?
@@ -376,7 +374,7 @@ class Serializer(Manager['C']):
     }
 
     if 'custom_fields' in data:
-      # TODO: Figure this out
+      # TODO Figure this out
       # Direct assignment to the reverse side of a related set is prohibited.
       # Use custom_fields.set() instead.
       data.pop('custom_fields')
@@ -599,7 +597,8 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
   ) -> None:
     """Adds multiple Contacts to (multiple) ContactLists."""
 
-    API_MAX_CONTACTS = 500
+    Contact = self._meta.get_field('members').related_model
+    step_size = Contact.API_ENDPOINT_BULK_LIMIT
 
     if contact_list is not None:
       list_ids = [str(contact_list.api_id)]
@@ -619,12 +618,12 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
       )
       raise ValueError(message)
 
-    for i in range(0, len(contact_ids), API_MAX_CONTACTS):
+    for i in range(0, len(contact_ids), step_size):
       self.check_api_limit()
       response = self.session.post(
         url=self.get_url(endpoint='/activities/add_list_memberships'),
         json={
-          'source': {'contact_ids': contact_ids[i:i + API_MAX_CONTACTS]},
+          'source': {'contact_ids': contact_ids[i:i + step_size]},
           'list_ids': list_ids,
         },
       )

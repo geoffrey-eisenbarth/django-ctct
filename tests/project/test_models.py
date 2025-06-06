@@ -48,7 +48,7 @@ class RequestsMockMixin(Generic[E]):
 
     with mute_signals(
       models.signals.post_save,
-      models.signals.m2m_changed,  # TODO: Do we need to mute this?
+      models.signals.m2m_changed,  # TODO: GH #15
     ):
       self.existing_obj = self.factory.create()
 
@@ -56,7 +56,7 @@ class RequestsMockMixin(Generic[E]):
         self.existing_obj.list_memberships.set(self.existing_lists)
 
         for custom_field in self.custom_fields:
-          # TODO: get_factory expects Type[C], ContactCustomField is Type[M]
+          # TODO get_factory expects Type[C], ContactCustomField is Type[M]
           get_factory(ContactCustomField).create(
             contact=self.existing_obj,
             custom_field=custom_field,
@@ -294,9 +294,9 @@ class ManyToManyContactListTest(RequestsMockMixin[E], TestCase):
     }[self.model]
 
     # Connect signals
-    # models.signals.post_save.connect(remote_save)     # TODO: GH #11?
-    # models.signals.pre_delete.connect(remote_delete)  # TODO: GH #11?
-    models.signals.m2m_changed.connect(remote_update_m2m)
+    # models.signals.post_save.connect(remote_save)        # TODO: GH #11?
+    # models.signals.pre_delete.connect(remote_delete)     # TODO: GH #11?
+    models.signals.m2m_changed.connect(remote_update_m2m)  # TODO: GH #15?
 
   @patch('django_ctct.models.Token.decode')
   def test_add_manytomany(self, token_decode: MagicMock) -> None:

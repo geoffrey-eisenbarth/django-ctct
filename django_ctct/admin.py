@@ -1,5 +1,5 @@
 import functools
-from typing import Optional, Callable, Iterable, Generic, Union, ParamSpec
+from typing import Optional, Callable, Iterable, Generic, ParamSpec
 from requests.exceptions import HTTPError
 
 from django import forms
@@ -18,7 +18,7 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  CTCTEndpointModel, E, ContactList, CustomField,
+  M, CTCTEndpointModel, E, ContactList, CustomField,
   Contact,
   ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -28,19 +28,6 @@ from django_ctct.vendor import mute_signals
 
 
 P = ParamSpec('P')
-
-# TODO: Is there a way to simplify this?
-ContactInlineModel = Union[
-  ContactCustomField,
-  ContactPhoneNumber,
-  ContactStreetAddress,
-  ContactNote,
-]
-ContactInlineFormSet = BaseInlineFormSet[
-  ContactInlineModel,
-  Contact,
-  ModelForm[ContactInlineModel]
-]
 
 
 def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
@@ -269,7 +256,7 @@ class ContactStreetAddressInline(
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.API_MAX_STREET_ADDRESSES
+  max_num = Contact.API_MAX_NUM['street_addresses']
 
 
 class ContactPhoneNumberInline(
@@ -281,7 +268,7 @@ class ContactPhoneNumberInline(
   exclude = ('api_id', )
 
   extra = 0
-  max_num = Contact.API_MAX_PHONE_NUMBERS
+  max_num = Contact.API_MAX_NUM['phone_numbers']
 
 
 class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
@@ -291,7 +278,7 @@ class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
   fields = ('content', )
 
   extra = 0
-  max_num = Contact.API_MAX_NOTES
+  max_num = Contact.API_MAX_NUM['notes']
 
   def has_change_permission(
     self,
@@ -392,7 +379,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     self,
     request: HttpRequest,
     form: ModelForm[Contact],
-    formset: ContactInlineFormSet,
+    formset: BaseInlineFormSet[M, Contact, ModelForm[M]],
     change: bool,
   ) -> None:
     """Set the current user as ContactNote author.

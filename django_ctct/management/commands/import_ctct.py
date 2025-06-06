@@ -78,7 +78,7 @@ class Command(BaseCommand):
 
     # Perform upsert using `bulk_create()`
     if model._meta.auto_created:
-      # TODO: Better verification that this is M2M
+      # TODO Better verification that this is M2M
       # Delete ManyToMany objects
       model.objects.all().delete()
       update_conflicts = False
@@ -146,6 +146,7 @@ class Command(BaseCommand):
     """Sets Django pk values for OneToOne and ForeignKeys objects."""
 
     otos, _, fks, _ = get_related_fields(model)
+
     fields = otos + fks
     for field in fields:
       if id_to_pk := self.get_id_to_pk(field.related_model):
@@ -193,7 +194,7 @@ class Command(BaseCommand):
           for o in objs:
             setattr(o, column_name, obj_w_pk.pk)
             api_id = str(getattr(o, reverse_name))
-            # TODO: use through_model instead of related_model?
+            # TODO use through_model instead of related_model?
             setattr(o, reverse_name, id_to_pk[related_model][api_id])
 
         elif rfk_attname := rfk_attnames.get(related_model):
@@ -220,7 +221,7 @@ class Command(BaseCommand):
       # No values returned
       return
 
-    # TODO: Why  only CampaignSummary?
+    # TODO Why only CampaignSummary? Probably should run it for all
     if model is CampaignSummary:
       # Convert API id to Django pk for the OneToOneField with EmailCampaign
       self.set_direct_object_pks(model, objs)
