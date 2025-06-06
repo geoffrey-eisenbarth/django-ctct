@@ -33,12 +33,12 @@ jobs:
       - name: Run tests
         run: |
           poetry run coverage run tests/project/manage.py test
-          poetry run coverage report -m
+          poetry run coverage xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: .coverage.xml
+          files: coverage.xml
           name: codecov-django-ctct
           token: ${{ secrets.CODECOV_TOKEN }}
 

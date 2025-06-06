@@ -4,6 +4,7 @@ __pycache__/
 *.sqlite3
 poetry.lock
 .coverage
+coverage.xml
 test*.html
 htmlcov/
 tests/**/local_settings.py
