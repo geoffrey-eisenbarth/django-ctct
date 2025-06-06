@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 from typing import Type, Optional, Any, Collection, Literal, cast
-from typing_extensions import reveal_type
+# from typing_extensions import reveal_type
 from uuid import UUID
 
 from tqdm import tqdm
@@ -80,7 +80,6 @@ class Command(BaseCommand):
     if model._meta.auto_created:
       # TODO: Better verification that this is M2M
       # Delete ManyToMany objects
-      reveal_type(model)
       model.objects.all().delete()
       update_conflicts = False
       unique_fields = update_fields = None
@@ -117,7 +116,6 @@ class Command(BaseCommand):
       unique_objs = objs
 
     # Perform the upsert
-    reveal_type(model)
     objs_w_pks = model.objects.bulk_create(
       objs=unique_objs,
       update_conflicts=update_conflicts,
@@ -228,8 +226,6 @@ class Command(BaseCommand):
       self.set_direct_object_pks(model, objs)
 
     # Upsert models to get Django pks
-    reveal_type(model)
-    reveal_type(objs)
     objs_w_pks = self.upsert(model, objs)
 
     # Convert API ids to Django pks for related objects

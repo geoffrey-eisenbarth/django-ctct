@@ -190,6 +190,8 @@ class Serializer(Manager['C']):
   ) -> JsonDict:
     """Convert from Django object to API request body."""
 
+    # TODO: is this import bad?
+    from django_ctct.models import CTCTModel, ContactCustomField
     data: JsonDict = {}
 
     field_names = {
@@ -234,14 +236,16 @@ class Serializer(Manager['C']):
         #   value, field_types
         # )
       elif type(value).__name__ == 'RelatedManager':
-        # TODO: assert value is a QuerySet of Serializer
-        if obj.pk is None:
+        if (obj.pk is None):
           continue
-        qs = value.all()
-        data[field_name] = [
-          qs.model.serializer.serialize(o, field_types)
-          for o in qs
-        ]
+        elif issubclass(value.model, CTCTModel):
+          qs = value.all()
+          data[field_name] = [
+            qs.model.serializer.serialize(o, field_types)
+            for o in qs
+          ]
+        elif issubclass(value.model, ContactCustomField):
+          data[field_name] = list(value.values('custom_field_id', 'value'))
       elif type(value).__name__ == 'ManyRelatedManager':
         if obj.pk is None:
           continue
@@ -339,8 +343,18 @@ class Serializer(Manager['C']):
   ) -> tuple[C, list[RelatedObjects]]:
     """Convert from API response body to Django object."""
 
+    # TODO: is this import bad?
+    from django_ctct.models import CampaignSummary
+
     data = data.copy()
-    data['api_id'] = data.pop(self.model.API_ID_LABEL)
+    if issubclass(self.model, CampaignSummary):
+      # TODO: Figure this out. Should we set API_ID_LABEL = 'campaign_id'?
+      #       If we 'pop' the value, do we want the OneToOneField? Should
+      #       we re-set the value in .save()? What if .save() doesn't get
+      #       called?
+      data['api_id'] = data['campaign_id']
+    else:
+      data['api_id'] = data.pop(self.model.API_ID_LABEL)
 
     # Clean field values, must be done before field restriction
     model_fields = self.model._meta.get_fields()
@@ -361,13 +375,19 @@ class Serializer(Manager['C']):
       if k in [getattr(f, 'attname', f.name) for f in model_fields]
     }
 
+    if 'custom_fields' in data:
+      # TODO: Figure this out
+      # Direct assignment to the reverse side of a related set is prohibited.
+      # Use custom_fields.set() instead.
+      data.pop('custom_fields')
+
     if pk:
       # Preserve unrelated db fields (e.g. EmailCampaign.send_preview)
       obj = self.model.objects.get(pk=pk)
       for field_attname, value in data.items():
         setattr(obj, field_attname, value)
     else:
-      # Instatiate new object
+      # Instantiate new object
       obj = self.model(**data)
 
     return (obj, related_objs)

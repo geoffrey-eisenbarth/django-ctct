@@ -24,7 +24,6 @@ from django_ctct.vendor import mute_signals
 from tests.factories import get_factory, TokenFactory
 
 
-
 class RequestsMockMixin(Generic[E]):
 
   model: Type[E]

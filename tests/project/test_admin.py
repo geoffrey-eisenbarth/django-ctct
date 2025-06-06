@@ -127,15 +127,18 @@ class ModelAdminTest(TestCRUD[E], TestCase):
           ]
 
         for i, related_obj in enumerate(related_objs):
-          data = inline_admin.model.serializer.serialize(related_obj)
           if inline_admin.model is ContactCustomField:
+            # TODO: ContactCustomField has no serializer (no api_id)
             # Use Django PKs not API ids
-            data['custom_field'] = CustomField.objects.get(
-              api_id=data.pop('custom_field_id'),
-            ).pk
-          elif inline_admin.model is CampaignActivity:
-            # Factory can't specify ManyToManyField during build()
-            data['contact_lists'] = [cl.pk for cl in self.existing_lists]
+            data = {
+              'custom_field': related_obj.custom_field.pk,
+              'value': related_obj.value,
+            }
+          else:
+            data = inline_admin.model.serializer.serialize(related_obj)
+            if inline_admin.model is CampaignActivity:
+              # Factory can't specify ManyToManyField during build()
+              data['contact_lists'] = [cl.pk for cl in self.existing_lists]
 
           for field_name, value in data.items():
             inline_data[f'{formset.prefix}-{i}-{field_name}'] = value

@@ -584,6 +584,10 @@ class ContactNote(CreatedAtMixin, CTCTModel):
   API_EDITABLE_FIELDS = (
     'content',
   )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'created_at',
+  )
   API_MAX_LENGTH = {
     'content': 2000,
   }
@@ -637,6 +641,11 @@ class ContactPhoneNumber(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
   API_EDITABLE_FIELDS = (
     'kind',
     'phone_number',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'created_at',
+    'updated_at',
   )
 
   MISSING_NUMBER = '000-000-0000'
@@ -708,6 +717,11 @@ class ContactStreetAddress(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     'state',
     'postal_code',
     'country',
+  )
+  API_READONLY_FIELDS = (
+    'api_id',
+    'created_at',
+    'updated_at',
   )
   API_MAX_LENGTH = {
     'street': 255,
