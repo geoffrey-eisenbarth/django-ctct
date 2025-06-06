@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import (
-  TYPE_CHECKING, Type, TypeVar, ClassVar,
+  TYPE_CHECKING, TypeVar, ClassVar,
   Iterable, Literal, Optional, NoReturn, Union, cast,
 )
 from urllib.parse import urlencode
@@ -312,14 +312,14 @@ class Serializer(Manager[C]):
       related_model = rfk_field.related_model
       parent = {rfk_field.remote_field.attname: parent_pk}
 
-      if is_model(related_model) and (related_model.__name__ == 'ContactCustomField'):
-        #breakpoint()
+      if is_model(related_model) and (
+        related_model.__name__ == 'ContactCustomField'
+      ):
         # TODO: GH #14
         objs = [
           related_model(**datum | parent)
           for datum in data.pop(rfk_field.name)
         ]
-        #breakpoint()
       elif is_ctct(related_model):
         objs = [
           related_model.serializer.deserialize(datum | parent)[0]

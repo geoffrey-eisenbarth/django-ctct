@@ -7,7 +7,6 @@ from tqdm import tqdm
 
 import django
 from django.db.models import Model
-from django.db.models.manager import BaseManager
 from django.utils.translation import gettext as _
 from django.core.management.base import BaseCommand
 
