@@ -1,4 +1,4 @@
-from typing import Type, Generic
+from typing import Type, TypeVar, Generic
 import unittest
 from unittest.mock import patch, MagicMock
 from uuid import uuid4
@@ -13,8 +13,8 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  JsonDict, E,
-  CustomField, ContactList,
+  JsonDict,
+  CTCTEndpointModel, CustomField, ContactList,
   Contact, ContactCustomField,
   EmailCampaign, CampaignActivity,
 )
@@ -22,6 +22,9 @@ from django_ctct.signals import remote_save, remote_delete, remote_update_m2m
 from django_ctct.vendor import mute_signals
 
 from tests.factories import get_factory, TokenFactory
+
+
+E = TypeVar('E', bound=CTCTEndpointModel)
 
 
 class RequestsMockMixin(Generic[E]):
@@ -56,7 +59,6 @@ class RequestsMockMixin(Generic[E]):
         self.existing_obj.list_memberships.set(self.existing_lists)
 
         for custom_field in self.custom_fields:
-          # TODO get_factory expects Type[C], ContactCustomField is Type[M]
           get_factory(ContactCustomField).create(
             contact=self.existing_obj,
             custom_field=custom_field,

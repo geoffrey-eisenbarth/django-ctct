@@ -1,7 +1,7 @@
 import datetime as dt
 import re
 from typing import (
-  Type, TypeVar, TypeAlias, ClassVar, TypeGuard,
+  Type, TypeAlias, ClassVar, TypeGuard,
   Optional, Any, Literal,
 )
 from typing_extensions import Self
@@ -29,6 +29,7 @@ from django_ctct.managers import (
 
 
 JsonDict = dict[str, Any]
+RelatedObjects: TypeAlias = tuple[Type[Model], list[Model]]
 
 
 class CreatedAtMixin(Model):
@@ -129,6 +130,10 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
     verbose_name=_('Expires In'),
   )
 
+  @property
+  def expires_at(self) -> dt.datetime:
+    return self.created_at + dt.timedelta(seconds=self.expires_in)
+
   class Meta:
     ordering = ('-created_at', )
 
@@ -139,10 +144,6 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
     )
     s = f"{self.token_type} Token (Expires: {expires_at})"
     return s
-
-  @property
-  def expires_at(self) -> dt.datetime:
-    return self.created_at + dt.timedelta(seconds=self.expires_in)
 
   def decode(self) -> JsonDict:
     """Decode JWT Token, which also verifies that it hasn't expired.
@@ -1096,17 +1097,6 @@ class CampaignActivity(CTCTEndpointModel):
     verbose_name=_('Format Type'),
   )
 
-  class Meta:
-    verbose_name = _('Email Campaign Activity')
-    verbose_name_plural = _('Email Campaign Activities')
-
-    constraints = [
-      models.UniqueConstraint(
-        fields=['campaign', 'role'],
-        name='django_ctct_unique_campaign_activity',
-      ),
-    ]
-
   @property
   def physical_address_in_footer(self) -> Optional[dict[str, str]]:
     """Returns the company address for email footers.
@@ -1119,6 +1109,17 @@ class CampaignActivity(CTCTEndpointModel):
 
     """
     return getattr(settings, 'CTCT_PHYSICAL_ADDRESS', None)
+
+  class Meta:
+    verbose_name = _('Email Campaign Activity')
+    verbose_name_plural = _('Email Campaign Activities')
+
+    constraints = [
+      models.UniqueConstraint(
+        fields=['campaign', 'role'],
+        name='django_ctct_unique_campaign_activity',
+      ),
+    ]
 
   def __str__(self) -> str:
     try:
@@ -1171,12 +1172,12 @@ class CampaignActivity(CTCTEndpointModel):
     super().save(*args, **kwargs)
 
 
-# TODO Set api_id to campaign_id
 class CampaignSummary(CTCTEndpointModel):
   """Django implementation of a CTCT EmailCampaign report."""
 
   API_ENDPOINT = '/reports/summary_reports/email_campaign_summaries'
 
+  API_ID_LABEL = 'campaign_id'
   API_READONLY_FIELDS = (
     'campaign_id',
     'sends',
@@ -1208,6 +1209,7 @@ class CampaignSummary(CTCTEndpointModel):
     help_text=_('The total number of unique sends'),
   )
   opens = models.IntegerField(
+
     null=True,
     default=None,
     verbose_name=_('Opens'),
@@ -1296,15 +1298,20 @@ class CampaignSummary(CTCTEndpointModel):
   def clean_remote_not_opened(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts('not_opened', data)
 
-
-M = TypeVar('M', bound=Model)
-C = TypeVar('C', bound=CTCTModel)
-E = TypeVar('E', bound=CTCTEndpointModel)
-
-RelatedObjects: TypeAlias = tuple[Type[Model], list[Model]]
+  def save(self, *args: Any, **kwargs: Any) -> None:
+    """Must set api_id manually."""
+    if (self.api_id is None) and (self.campaign_id is not None):
+      self.api_id = self.campaign.api_id
+    super().save(*args, **kwargs)
 
 
 def is_ctct(
   val: Type[BaseModel] | Literal['self']
 ) -> TypeGuard[Type[CTCTModel]]:
   return isinstance(val, type) and issubclass(val, CTCTModel)
+
+
+def is_model(
+  val: Type[BaseModel] | Literal['self']
+) -> TypeGuard[Type[Model]]:
+  return isinstance(val, type) and issubclass(val, Model)

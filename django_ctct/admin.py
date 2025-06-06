@@ -1,5 +1,5 @@
 import functools
-from typing import Optional, Callable, Iterable, Generic, ParamSpec
+from typing import TypeVar, ParamSpec, Generic, Optional, Callable, Iterable
 from requests.exceptions import HTTPError
 
 from django import forms
@@ -18,7 +18,7 @@ from django.utils.formats import date_format
 from django.utils.translation import gettext as _
 
 from django_ctct.models import (
-  M, CTCTEndpointModel, E, ContactList, CustomField,
+  CTCTEndpointModel, ContactList, CustomField,
   Contact,
   ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -28,6 +28,8 @@ from django_ctct.vendor import mute_signals
 
 
 P = ParamSpec('P')
+M = TypeVar('M', bound=Model)
+E = TypeVar('E', bound=CTCTEndpointModel)
 
 
 def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:

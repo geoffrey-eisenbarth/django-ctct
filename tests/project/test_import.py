@@ -1,7 +1,7 @@
 from functools import partial
 from math import ceil
 import random
-from typing import Type, Optional, cast, Iterable
+from typing import Type, TypeVar, Optional, Iterable, cast
 from unittest.mock import patch, MagicMock
 from urllib.parse import urlencode
 
@@ -14,12 +14,15 @@ from django.test import TestCase
 
 from django_ctct.vendor import mute_signals
 from django_ctct.models import (
-  JsonDict, E,
+  JsonDict,
   CTCTModel, CTCTEndpointModel, ContactList, CustomField, Contact,
   ContactNote, ContactPhoneNumber, ContactStreetAddress, ContactCustomField,
   EmailCampaign, CampaignActivity, CampaignSummary,
 )
 from tests.factories import get_factory, TokenFactory, NUM_RELATED_OBJS
+
+
+E = TypeVar('E', bound=CTCTEndpointModel)
 
 
 class TestImportCommand(TestCase):
@@ -96,9 +99,11 @@ class TestImportCommand(TestCase):
             )
             cast(Contact, contact).list_memberships.set(memberships)
 
-            factory = get_factory(ContactCustomField)
             for custom_field in instances[CustomField]:
-              factory(contact=contact, custom_field=custom_field)
+              get_factory(ContactCustomField).create(
+                contact=contact,
+                custom_field=custom_field,
+              )
 
       # Serialize instances
       for model, objs in instances.items():

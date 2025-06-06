@@ -1,13 +1,15 @@
-from typing import Type, Generic, cast, Any
+from typing import Type, TypeVar, Generic, Any, Optional, cast
 
 import factory
 import factory.fuzzy
 from factory.django import DjangoModelFactory
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AbstractUser
+from django.db.models import Model
 
 from django_ctct.models import (
-  CTCTModel, C, Token, ContactList, CustomField, Contact,
+  CTCTModel, Token, ContactList, CustomField, Contact,
   ContactNote, ContactPhoneNumber, ContactStreetAddress, ContactCustomField,
   EmailCampaign, CampaignActivity, CampaignSummary,
 )
@@ -19,11 +21,15 @@ NUM_RELATED_OBJS: dict[Type[CTCTModel], int] = {
 }
 
 
-def get_factory(model: Type[C]) -> Type[DjangoModelFactory[C]]:
-  return cast(Type[DjangoModelFactory[C]], FACTORIES[model])
+M = TypeVar('M', bound=Model)
+U = TypeVar('U', bound=AbstractUser)
 
 
-class UserFactory(DjangoModelFactory):
+def get_factory(model: Type[M]) -> Type[DjangoModelFactory[M]]:
+  return cast(Type[DjangoModelFactory[M]], FACTORIES[model])
+
+
+class UserFactory(DjangoModelFactory[U]):
   class Meta:
     model = get_user_model()
 
@@ -31,7 +37,7 @@ class UserFactory(DjangoModelFactory):
   email = factory.Sequence(lambda n: f'user{n}@example.com')
   first_name = factory.Faker('first_name')
   last_name = factory.Faker('last_name')
-  password = factory.django.Password('pw')
+  password = factory.django.Password('pw')  # type: ignore[attr-defined]
 
 
 class TokenFactory(DjangoModelFactory[Token]):
@@ -43,7 +49,7 @@ class TokenFactory(DjangoModelFactory[Token]):
   scope = Token.API_SCOPE
 
 
-class CTCTModelFactory(DjangoModelFactory[C], Generic[C]):
+class CTCTModelFactory(DjangoModelFactory[M], Generic[M]):
   api_id = factory.Faker('uuid4')
 
 
@@ -141,16 +147,26 @@ class ContactWithRelatedObjsFactory(ContactFactory):
   )
 
   @factory.post_generation
-  def custom_fields(self, create, extracted, **kwargs):
+  def custom_fields(
+    self,
+    create: bool,
+    extracted: Optional[list[ContactCustomField]],
+    **kwargs: Any,
+  ) -> None:
     if not create or not extracted:
       return
-    self.custom_fields.add(*extracted)
+    self.custom_fields.add(*extracted)  # type: ignore[attr-defined]
 
   @factory.post_generation
-  def list_memberships(self, create, extracted, **kwargs):
+  def list_memberships(
+    self,
+    create: bool,
+    extracted: Optional[list[ContactList]],
+    **kwargs: Any,
+  ) -> None:
     if not create or not extracted:
       return
-    self.list_memberships.add(*extracted)
+    self.list_memberships.add(*extracted)  # type: ignore[attr-defined]
 
 
 class EmailCampaignFactory(CTCTModelFactory[EmailCampaign]):
@@ -170,13 +186,18 @@ class CampaignActivityFactory(CTCTModelFactory[CampaignActivity]):
   html_content = factory.Faker('text')
 
   @factory.post_generation
-  def contact_lists(self, create, extracted, **kwargs):
+  def contact_lists(
+    self,
+    create: bool,
+    extracted: Optional[list[ContactList]],
+    **kwargs: Any,
+  ) -> None:
     if not create or not extracted:
       # Simple build, or nothing to add, do nothing.
       return
 
     # Add the iterable of ContactLists using bulk addition
-    self.contact_lists.add(*extracted)
+    self.contact_lists.add(*extracted)  # type: ignore[attr-defined]
 
 
 class CampaignSummaryFactory(DjangoModelFactory[CampaignSummary]):
@@ -208,7 +229,7 @@ class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
   )
 
 
-FACTORIES: dict[Type[CTCTModel], Any] = {
+FACTORIES: dict[Type[Model], Any] = {
   Token: TokenFactory,
   ContactList: ContactListFactory,
   CustomField: CustomFieldFactory,

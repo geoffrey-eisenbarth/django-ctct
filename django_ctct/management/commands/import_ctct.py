@@ -1,23 +1,27 @@
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import Type, Optional, Any, Collection, Literal, cast
-# from typing_extensions import reveal_type
+from typing import Type, TypeVar, Optional, Any, Collection, Literal, cast
 from uuid import UUID
 
 from tqdm import tqdm
 
 import django
 from django.db.models import Model
+from django.db.models.manager import BaseManager
 from django.utils.translation import gettext as _
 from django.core.management.base import BaseCommand
 
 from django_ctct.models import (
-  M, CTCTModel, CTCTEndpointModel, E, ContactList, CustomField,
+  CTCTModel, CTCTEndpointModel, ContactList, CustomField,
   Contact, ContactCustomField,
   EmailCampaign, CampaignActivity, CampaignSummary,
   RelatedObjects, is_ctct
 )
 from django_ctct.utils import get_related_fields
+
+
+M = TypeVar('M', bound=Model)
+E = TypeVar('E', bound=CTCTEndpointModel, covariant=True)
 
 
 class Command(BaseCommand):
@@ -49,7 +53,7 @@ class Command(BaseCommand):
 
   def get_id_to_pk(
     self,
-    model: Type[Model] | Literal['self']
+    model: Type[M] | Literal['self']
   ) -> dict[str, int]:
     """Returns a dictionary to convert CTCT API ids to Django pks."""
     if is_ctct(model):
@@ -70,16 +74,15 @@ class Command(BaseCommand):
     unique_fields: Optional[Collection[str]] = ['api_id'],
     update_fields: Optional[Collection[str]] = None,
     silent: Optional[bool] = None,
-  ) -> list[M]:
+  ) -> list[Model]:
+    """Perform upsert using `bulk_create()`."""
 
     verb = 'Imported' if (update_fields is None) else 'Updated'
     if silent is None:
       silent = self.noinput
 
-    # Perform upsert using `bulk_create()`
-    if model._meta.auto_created:
-      # TODO Better verification that this is M2M
-      # Delete ManyToMany objects
+    if model._meta.auto_created and hasattr(model, 'contactlist_id'):
+      # Delete existing through model instances
       model.objects.all().delete()
       update_conflicts = False
       unique_fields = update_fields = None
@@ -98,13 +101,11 @@ class Command(BaseCommand):
       ]
 
     # Remove possible duplicates (CTCT API can't be trusted)
+    id_field: Optional[str] = None
     if model is CampaignSummary:
       id_field = 'campaign_id'
-      # raise NotImplementedError("CampaignSummary is now a CTCTModel?")
     elif issubclass(model, CTCTModel):
       id_field = 'api_id'
-    else:
-      id_field = None
 
     if id_field is not None:
       seen, unique_objs = set(), []
@@ -178,23 +179,25 @@ class Command(BaseCommand):
         for m2m in m2ms
       }
 
-    if model is Contact:
-      m2m_attnames[ContactCustomField] = ('contact_id', 'custom_field_id')
-      id_to_pk[ContactCustomField] = self.get_id_to_pk(CustomField)
-
     rfk_attnames = {
       rel.related_model: rel.field.attname
       for rel in rfks
     }
+
+    if model is Contact:
+      # TODO: GH #14 ContactCustomField is kind of a ManyToMany
+      m2m_attnames[ContactCustomField] = (
+        rfk_attnames.pop(ContactCustomField), 'custom_field_id'
+      )
+      id_to_pk[ContactCustomField] = self.get_id_to_pk(CustomField)
 
     for obj_w_pk, list_of_related_objs in zip(objs_w_pks, per_obj_list_of_related_objs):  # noqa: E501
       for related_model, objs in list_of_related_objs:
         if m2m_attname := m2m_attnames.get(related_model):
           column_name, reverse_name = m2m_attname
           for o in objs:
-            setattr(o, column_name, obj_w_pk.pk)
             api_id = str(getattr(o, reverse_name))
-            # TODO use through_model instead of related_model?
+            setattr(o, column_name, obj_w_pk.pk)
             setattr(o, reverse_name, id_to_pk[related_model][api_id])
 
         elif rfk_attname := rfk_attnames.get(related_model):
@@ -221,10 +224,8 @@ class Command(BaseCommand):
       # No values returned
       return
 
-    # TODO Why only CampaignSummary? Probably should run it for all
-    if model is CampaignSummary:
-      # Convert API id to Django pk for the OneToOneField with EmailCampaign
-      self.set_direct_object_pks(model, objs)
+    # Convert API id to Django pks
+    self.set_direct_object_pks(model, objs)
 
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)

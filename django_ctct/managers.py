@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import (
-  TYPE_CHECKING, Type, ClassVar,
+  TYPE_CHECKING, Type, TypeVar, ClassVar,
   Iterable, Literal, Optional, NoReturn, Union, cast,
 )
 from urllib.parse import urlencode
@@ -31,14 +31,18 @@ from django_ctct.vendor import mute_signals
 
 if TYPE_CHECKING:
   from django_ctct.models import (
-    JsonDict, C, E, RelatedObjects,
+    JsonDict, RelatedObjects,
+    EndpointMixin, CTCTModel, CTCTEndpointModel,
     Token, ContactList, Contact,
     EmailCampaign, CampaignActivity, CampaignSummary,
   )
 
+T = TypeVar('T', bound='EndpointMixin')
+E = TypeVar('E', bound='CTCTEndpointModel')
+C = TypeVar('C', bound='CTCTModel')
 
-# TODO How to make this accept Token too?
-class ConnectionManagerMixin(Manager['E']):
+
+class ConnectionManagerMixin(Manager[T]):
   """Manager mixin for utilizing an API."""
 
   API_LIMIT_CALLS: int = 4   # four calls
@@ -179,7 +183,7 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
     return token
 
 
-class Serializer(Manager['C']):
+class Serializer(Manager[C]):
 
   TS_FORMAT: ClassVar[str] = '%Y-%m-%dT%H:%M:%SZ'
 
@@ -190,8 +194,6 @@ class Serializer(Manager['C']):
   ) -> JsonDict:
     """Convert from Django object to API request body."""
 
-    # TODO is this import bad?
-    from django_ctct.models import CTCTModel, ContactCustomField
     data: JsonDict = {}
 
     field_names = {
@@ -215,6 +217,9 @@ class Serializer(Manager['C']):
         continue
       if field_name == 'api_id':
         # Use API_ID_LABEL and convert UUID to string
+        # NOTE: For CampaignSummaries, we rely on the fact that `campaign_id`
+        #       happens to be the OneToOneField's attname and a value that
+        #       the CTCT API accepts (aka API_ID_LABEL).
         data[self.model.API_ID_LABEL] = str(value)
       elif isinstance(value, dt.datetime):
         # Convert datetime to string
@@ -227,28 +232,31 @@ class Serializer(Manager['C']):
       elif isinstance(getattr(self.model, field_name, None), property):
         # The API field was defined as a @property
         data[field_name] = value
-      elif isinstance(value, Model):  # TODO ?
-        raise NotImplementedError
-        # isinstance(getattr(value, 'remote', None), RemoteManager):
-        # data[field_name] = type(value).serializer.serialize(
-        #   value, field_types
-        # )
-      elif type(value).__name__ == 'RelatedManager':
-        if (obj.pk is None):
+      elif isinstance(value, models.Manager):
+        if obj.pk is None:
           continue
-        elif issubclass(value.model, CTCTModel):
+        elif hasattr(value, 'through'):
+          # ManyToManyField: only need a list of api_ids
+          qs = value.values_list('api_id', flat=True)
+          data[field_name] = list(map(str, qs))
+        elif hasattr(value.model, 'serializer'):
+          # ReverseForeignKey: serialize QuerySet
           qs = value.all()
           data[field_name] = [
             qs.model.serializer.serialize(o, field_types)
             for o in qs
           ]
-        elif issubclass(value.model, ContactCustomField):
-          data[field_name] = list(value.values('custom_field_id', 'value'))
-      elif type(value).__name__ == 'ManyRelatedManager':
-        if obj.pk is None:
-          continue
-        qs = value.values_list('api_id', flat=True)
-        data[field_name] = list(map(str, qs))
+        elif value.model.__name__ == 'ContactCustomField':
+          # TODO: GH #14
+          data[field_name] = [
+            {
+              'custom_field_id': str(row['custom_field__api_id']),
+              'value': row['value'],
+            }
+            for row in value.values('custom_field__api_id', 'value')
+          ]
+      elif isinstance(value, Model):
+        raise NotImplementedError
       else:
         raise NotImplementedError
 
@@ -293,7 +301,7 @@ class Serializer(Manager['C']):
   ) -> tuple[JsonDict, list[RelatedObjects]]:
     """Deserialize ManyToManyFields and ReverseForeignKeys."""
 
-    from django_ctct.models import is_ctct
+    from django_ctct.models import is_ctct, is_model
 
     list_of_related_objs: list[RelatedObjects] = []
     objs: list[Model]
@@ -302,21 +310,31 @@ class Serializer(Manager['C']):
     for rfk_field in filter(lambda f: f.name in data, rfks):
       # Reverse ForeignKeys get deserialized into model instances
       related_model = rfk_field.related_model
-      if not is_ctct(related_model):
+      parent = {rfk_field.remote_field.attname: parent_pk}
+
+      if is_model(related_model) and (related_model.__name__ == 'ContactCustomField'):
+        #breakpoint()
+        # TODO: GH #14
+        objs = [
+          related_model(**datum | parent)
+          for datum in data.pop(rfk_field.name)
+        ]
+        #breakpoint()
+      elif is_ctct(related_model):
+        objs = [
+          related_model.serializer.deserialize(datum | parent)[0]
+          for datum in data.pop(rfk_field.name)
+        ]
+      else:
         continue
 
-      parent = {rfk_field.remote_field.attname: parent_pk}
-      objs = [
-        related_model.serializer.deserialize(datum | parent)[0]
-        for datum in data.pop(rfk_field.name)
-      ]
       if objs:
-        related_objs = (cast(Type[Model], related_model), objs)
+        related_objs = (related_model, objs)
         list_of_related_objs.append(related_objs)
 
-    # TODO: GH #12
     for m2m_field in filter(lambda f: f.name in data, m2ms):
       # ManyToManyFields get deserialized into "through model" instances
+      # TODO: GH #12, why are we setting contact_id = api_id?
       through_model = m2m_field.remote_field.through
       if through_model is None:
         continue
@@ -341,18 +359,9 @@ class Serializer(Manager['C']):
   ) -> tuple[C, list[RelatedObjects]]:
     """Convert from API response body to Django object."""
 
-    # TODO is this import bad?
-    from django_ctct.models import CampaignSummary
-
+    # If API_ID_LABEL is not a model field name, it will be removed later
     data = data.copy()
-    if issubclass(self.model, CampaignSummary):
-      # TODO Figure this out. Should we set API_ID_LABEL = 'campaign_id'?
-      #       If we 'pop' the value, do we want the OneToOneField? Should
-      #       we re-set the value in .save()? What if .save() doesn't get
-      #       called?
-      data['api_id'] = data['campaign_id']
-    else:
-      data['api_id'] = data.pop(self.model.API_ID_LABEL)
+    data['api_id'] = data[self.model.API_ID_LABEL]
 
     # Clean field values, must be done before field restriction
     model_fields = self.model._meta.get_fields()
@@ -367,17 +376,11 @@ class Serializer(Manager['C']):
 
     # Restrict to the fields defined in the Django object
     # NOTE: We prefer `field.attname` over `field.name` in order to pick up
-    # ForeignKeys and OneToOneFields
+    #       ForeignKeys and OneToOneFields
     data = {
       k: v for k, v in data.items()
       if k in [getattr(f, 'attname', f.name) for f in model_fields]
     }
-
-    if 'custom_fields' in data:
-      # TODO Figure this out
-      # Direct assignment to the reverse side of a related set is prohibited.
-      # Use custom_fields.set() instead.
-      data.pop('custom_fields')
 
     if pk:
       # Preserve unrelated db fields (e.g. EmailCampaign.send_preview)
@@ -392,14 +395,14 @@ class Serializer(Manager['C']):
 
 
 class RemoteManager(
-  ConnectionManagerMixin['E'],
-  Serializer['E'],
-  Manager['E'],
+  ConnectionManagerMixin[E],
+  Serializer[E],
+  Manager[E],
 ):
   """Manager for utilizing the CTCT API."""
 
   # @task(queue_name='ctct')
-  def create(self, obj: 'E') -> 'E':  # type: ignore[override]
+  def create(self, obj: E) -> E:  # type: ignore[override]
     """Creates an existing Django object on the remote server.
 
     Notes
@@ -420,7 +423,7 @@ class RemoteManager(
     data = self.raise_or_json(response)
 
     # NOTE: We don't need to do anything with `related_objs` since they were
-    # set locally before the API request
+    #       set locally before the API request.
     # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 
@@ -495,7 +498,7 @@ class RemoteManager(
     return list_of_tuples
 
   # @task(queue_name='ctct')
-  def update(self, obj: 'E') -> 'E':  # type: ignore[override]
+  def update(self, obj: E) -> E:  # type: ignore[override]
     """Updates an existing Django object on the remote server.
 
     Notes
@@ -518,7 +521,7 @@ class RemoteManager(
     data = self.raise_or_json(response)
 
     # NOTE: We don't need to do anything with `related_objs` since they were
-    # set locally before the API request
+    #       set locally before the API request.
     # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 
@@ -531,7 +534,7 @@ class RemoteManager(
   # @task(queue_name='ctct')
   def delete(
     self,
-    obj: 'E',
+    obj: E,
     endpoint_suffix: Optional[str] = None,
   ) -> None:
     """Deletes existing Django object(s) on the remote server.
@@ -554,7 +557,7 @@ class RemoteManager(
       # Allow 404
       self.raise_or_json(response)
 
-  def bulk_delete(self, objs: Iterable['E']) -> None:
+  def bulk_delete(self, objs: Iterable[E]) -> None:
     """Deletes multiple objects from remote server in batches."""
 
     if self.model.API_ENDPOINT_BULK_DELETE is None:
@@ -597,8 +600,14 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
   ) -> None:
     """Adds multiple Contacts to (multiple) ContactLists."""
 
-    Contact = self._meta.get_field('members').related_model
-    step_size = Contact.API_ENDPOINT_BULK_LIMIT
+    from django_ctct.models import is_ctct
+
+    Contact = self.model._meta.get_field('members').related_model
+    if is_ctct(Contact) and hasattr(Contact, 'API_ENDPOINT_BULK_LIMIT'):
+      step_size = Contact.API_ENDPOINT_BULK_LIMIT
+    else:
+      message = _("Contact must specify 'API_ENDPOINT_BULK_LIMIT'.")
+      raise ImproperlyConfigured(message)
 
     if contact_list is not None:
       list_ids = [str(contact_list.api_id)]
@@ -756,7 +765,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     for (model, related_objs) in list_of_related_objs:
       if (model is CampaignActivity):
         # NOTE: All lists are invariant, so they won't remember that
-        #       `related_objs` is a list[CampaignActivity]
+        #       `related_objs` is a list[CampaignActivity].
         for related_obj in cast(list[CampaignActivity], related_objs):
           if related_obj.role == 'primary_email':
             activity.api_id = related_obj.api_id
@@ -802,7 +811,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     data = self.raise_or_json(response)
 
     # NOTE: We don't need to do anything with `related_objs` since they were
-    # set locally before the API request
+    #       set locally before the API request.
     # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 

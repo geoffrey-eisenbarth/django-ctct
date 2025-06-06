@@ -1,11 +1,11 @@
-from typing import TYPE_CHECKING, Type, Generic
+from typing import TYPE_CHECKING, Type, TypeVar
 from unittest import SkipTest
 from unittest.mock import patch, MagicMock
 
 from parameterized import parameterized_class
 
 from django.db import models
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
@@ -17,7 +17,7 @@ from django.utils.translation import gettext as _
 
 from django_ctct.vendor import mute_signals
 from django_ctct.models import (
-  JsonDict, C, E,
+  JsonDict, CTCTEndpointModel,
   CustomField, ContactList, Contact,
   ContactCustomField, ContactNote,
   EmailCampaign, CampaignActivity, CampaignSummary,
@@ -29,6 +29,9 @@ from tests.project.test_models import TestCRUD
 
 if TYPE_CHECKING:
   from django.test.client import _MonkeyPatchedWSGIResponse as TestHttpResponse
+
+
+E = TypeVar('E', bound=CTCTEndpointModel)
 
 
 @parameterized_class(
@@ -109,8 +112,6 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       else:
         # Include new data for related object
         related_obj_factory = get_factory(inline_admin.model)
-        # TODO inline.admin is of type CTCTModel, can't be ContactCustomField
-        # TODO how does this play into serializer?
         if inline_admin.model is ContactCustomField:
           # We want to re-use existing CustomFields
           related_objs = [
@@ -128,7 +129,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
         for i, related_obj in enumerate(related_objs):
           if inline_admin.model is ContactCustomField:
-            # TODO ContactCustomField has no serializer (no api_id)
+            # TODO: GH #14
             # Use Django PKs not API ids
             data = {
               'custom_field': related_obj.custom_field.pk,
@@ -284,9 +285,9 @@ class ModelAdminTest(TestCRUD[E], TestCase):
   ('model', ),
   [(ContactNote, CampaignSummary, )],
 )
-class ViewModelAdminTest(TestCase, Generic[C]):
+class ViewModelAdminTest(TestCase):
 
-  model: Type[C]
+  model: Type[Model]
 
   def setUp(self) -> None:
     self.client = Client()
