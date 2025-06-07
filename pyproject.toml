@@ -1,6 +1,6 @@
 [project]
 name = "django-ctct"
-version = "0.0.1.dev3"
+version = "0.0.1.dev5"
 description = "A Django interface for the Constant Contact API"
 authors = [
     {name = "Geoffrey Eisenbarth",email = "geoffrey.eisenbarth@gmail.com"}
