@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 from typing import Type, TypeAlias
 
-from django.contrib.contenttypes.fields import GenericForeignKey
 from django.db.models import (
   Model, OneToOneField, ManyToManyField, ForeignKey, ManyToOneRel,
 )
@@ -29,10 +28,7 @@ def get_related_fields(model: Type[Model]) -> RelatedFields:
   reverse_fks: list[ManyToOneRel] = []
 
   for field in model._meta.get_fields():
-    if isinstance(field, GenericForeignKey):
-      # Unused by the app, so we exclude them here to simplify type checking
-      continue
-    elif isinstance(field, OneToOneField):
+    if isinstance(field, OneToOneField):
       one_to_ones.append(field)
     elif isinstance(field, ManyToManyField):
       many_to_manys.append(field)
