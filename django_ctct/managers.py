@@ -490,7 +490,7 @@ class RemoteManager(
       data = next(iter(metadata.values()))
       list_of_tuples += map(self.deserialize, data)
 
-      if links is not None:
+      if links:
         endpoint = links['next']['href']
       else:
         paginated = False
