@@ -664,15 +664,15 @@ class ContactRemoteManager(RemoteManager['Contact']):
     when creating Contacts that may already exist in ConstantContact's
     database, even if they've been "deleted" before.
 
-    Updates to existing contacts are partial updates. This endpoint only
-    updates the fields that are included in the request body. Updates append
-    new contact lists or custom fields to the existing `list_memberships` or
-    `custom_fields` arrays.
+    Updates to existing contacts are partial updates and this endpoint will
+    only update the fields that are included in the request body. Updates
+    append new contact lists or custom fields the existing `list_memberships`
+    or `custom_fields` arrays. As a result, we cannot use this endpoint to
+    remove a list from `list_memberships`, but must use `.update()`.
 
     The PUT call (e.g. just using update()) will overwrite all properties not
     included in the request body with NULL, so the `serialize()` method must
-    includes all important fields. While the `create_or_update()` method
-    supports partial updates, it won't allow us to remove a ContactList.
+    includes all important fields.
 
     """
 
