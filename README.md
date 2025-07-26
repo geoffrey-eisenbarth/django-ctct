@@ -4,13 +4,16 @@
 
 This Django app provides a seamless interface to the Constant Contact API, allowing you to manage contacts, email campaigns, and other Constant Contact functionalities directly from your Django project.
 
-**Warning:** This package is under active development. While it is our intention to develop with a consistent API going forward, we will not make promises until a later version is released.
+**Warning:** This package is under active development.
+While it is our intention to develop with a consistent API going forward, we will not make promises until a later version is released.
+
 
 ## Installation
 
 ```bash
 pip install django-ctct
 ```
+
 
 ## Configuration
 
@@ -40,6 +43,7 @@ urlpatterns = [
   # ... other URL patterns
 ]
 ```
+
 3) **ConstantContact API Credentials:**
 
 Head to https://app.constantcontact.com/pages/dma/portal/ to set up your application with ConstantContact.
@@ -89,6 +93,7 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
   * `CTCT_PREVIEW_MESSAGE` will be blank by default.
 
 3) **Run Migrations:**
+
 ```bash
 > ./manage.py makemigrations
 > ./manage.py migrate
@@ -97,9 +102,10 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
 4) **Create Authenticatin Token:**
 
 After the app has been installed and configured, you must generate your first auth token:
-  * Open up the `CTCT_REDIRECT_URI` address in your browser
-  * Use your ConstantContact credentials to log in
-  * From this point forward `django-ctct` should use refresh tokens, so no need to manually log in again
+
+ * Open up the `CTCT_REDIRECT_URI` address in your browser
+ * Use your ConstantContact credentials to log in
+ * From this point forward `django-ctct` should use refresh tokens, so no need to manually log in again
 
 
 ## Usage
@@ -109,11 +115,15 @@ If you wish to import data from ConstantContact.com into your local database (re
 > ./manage.py import_ctct
 ```
 
-You will be asked before each model type is imported. **Note** ConstantContact does not provide a bulk API endpoint for fetching Campaign Activities, so depending on the size of your account, this might take some time and possible put you over their 10,000 request per day limit if you run it regularly.
+You will be asked before each model type is imported.
+**Note** ConstantContact does not provide a bulk API endpoint for fetching Campaign Activities, so depending on the size of your account, this might take some time and possible put you over their 10,000 request per day limit if you run it regularly.
 
-Since ConstantContact does not offer any webhooks, you will need to set up a cron job if you want your account to remain syncronized with ConstantContact's database. You can use the `--no-input` flag to bypass the interactive questions. The `--stats-only` flag is useful for running a cron job to keep EmailCampaign statistics updated.
+Since ConstantContact does not offer any webhooks, you will need to set up a cron job if you want your account to remain syncronized with ConstantContact's database.
+You can use the `--no-input` flag to bypass the interactive questions.
+The `--stats-only` flag is useful for running a cron job to keep EmailCampaign statistics updated.
 
 If you wish to use the Django admin to interact with ConstantContact, you must explicitly set the `CTCT_USE_ADMIN` and `CTCT_SYNC_ADMIN` settings to `True`.
+
 
 ## Testing
 
@@ -134,13 +144,16 @@ To run tests:
 > poetry run coverage report
 ```
 
+
 ## Contributing
 
 Once version 0.0.1 is released on PyPI, we hope to implement the following new features (in no particular order):
 
-  * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc). This will be controlled by the `CTCT_SYNC_SIGNALS` setting. **Update** This probably won't work as desired since the primary object will be saved before related objects are.
-  * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
-  * Add `models.CheckConstraint` and `models.UniqueConstraint` constraints that are currently commented out.
+ * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc).
+ This will be controlled by the `CTCT_SYNC_SIGNALS` setting.
+ **Update** This probably won't work as desired since the primary object will be saved before related objects are.
+ * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
+ * Add `models.CheckConstraint` and `models.UniqueConstraint` constraints that are currently commented out.
   
 
 I'm always open to new suggestions, so please reach out on GitHub: https://github.com/geoffrey-eisenbarth/django-ctct/
