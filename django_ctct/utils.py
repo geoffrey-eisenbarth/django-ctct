@@ -17,7 +17,7 @@ RelatedFields: TypeAlias = tuple[
 ]
 
 
-def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:
+def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%S.%fZ') -> dt.datetime:
   return timezone.make_aware(dt.datetime.strptime(s, ts_format))
 
 
