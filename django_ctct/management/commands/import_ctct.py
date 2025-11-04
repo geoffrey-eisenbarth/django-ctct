@@ -249,12 +249,13 @@ class Command(BaseCommand):
   def import_campaign_activities(self) -> None:
     """CampaignActivities must be imported one at a time."""
 
-    # First make sure CampaignActivity API id's are stored locally
+    # First, make sure all CampaignActivity API id's are stored locally
     EmailCampaign.remote.connect()
     for campaign in EmailCampaign.objects.exclude(
       api_id__isnull=True,
+    ).filter(
       campaign_activities__role='primary_email',
-      campaign_activities__api_id__isnull=False,
+      campaign_activities__api_id__isnull=True,
     ):
       # Fetch from API
       assert isinstance(campaign.api_id, UUID)
@@ -272,7 +273,7 @@ class Command(BaseCommand):
                 obj.campaign_id = campaign.pk
                 obj.save()
 
-    # Now fetch CampaignActivity details
+    # Then, fetch CampaignActivity details
     CampaignActivity.remote.connect()
 
     activities = CampaignActivity.objects.filter(
