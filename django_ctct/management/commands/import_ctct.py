@@ -132,7 +132,7 @@ class Command(BaseCommand):
     # Inform the user
     if not silent:
       message = self.style.SUCCESS(
-        f'{verb} {len(objs)} {model.__name__} instances.'
+        f'{verb} {len(objs):,} {model.__name__} instances.'
       )
       self.stdout.write(message)
 
