@@ -98,9 +98,7 @@ class ContactPhoneNumberFactory(CTCTModelFactory[ContactPhoneNumber]):
     model = ContactPhoneNumber
 
   contact = factory.SubFactory(ContactFactory)
-  kind = factory.fuzzy.FuzzyChoice(
-    _[0] for _ in ContactPhoneNumber.KINDS
-  )
+  kind = factory.Sequence(lambda n: ContactPhoneNumber.KINDS[n % 3][0])
   phone_number = factory.Faker('phone_number')
 
 
@@ -109,9 +107,7 @@ class ContactStreetAddressFactory(CTCTModelFactory[ContactStreetAddress]):
     model = ContactStreetAddress
 
   contact = factory.SubFactory(ContactFactory)
-  kind = factory.fuzzy.FuzzyChoice(
-    _[0] for _ in ContactStreetAddress.KINDS
-  )
+  kind = factory.Sequence(lambda n: ContactStreetAddress.KINDS[n % 3][0])
   street = factory.Faker('street_address')
   city = factory.Faker('city')
   state = factory.Faker('state_abbr')

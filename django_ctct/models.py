@@ -676,16 +676,16 @@ class ContactPhoneNumber(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     verbose_name = _('Phone Number')
     verbose_name_plural = _('Phone Numbers')
 
-    # constraints = [
-    #    models.UniqueConstraint(  # TODO: GH #7
-    #      fields=['contact', 'kind'],
-    #      name='django_ctct_unique_phone_number',
-    #    ),
-    #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_NUM['phone_numbers'])
-    #      name='django_ctct_limit_phone_numbers',
-    #    ),
-    # ]
+    constraints = [
+       models.UniqueConstraint(
+         fields=['contact', 'kind'],
+         name='django_ctct_unique_phone_number',
+       ),
+       # models.CheckConstraint(   # TODO: GH #8
+       #   check=Q(contact__phone_numbers__count__lte=ContactRemoteManager.API_MAX_NUM['phone_numbers'])
+       #   name='django_ctct_limit_phone_numbers',
+       # ),
+    ]
 
   def __str__(self) -> str:
     return f'[{self.get_kind_display()}] {self.phone_number}'
@@ -777,16 +777,16 @@ class ContactStreetAddress(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     verbose_name = _('Street Address')
     verbose_name_plural = _('Street Addresses')
 
-    # constraints = [
-    #    models.UniqueConstraint(  # TODO: GH #7
-    #      fields=['contact', 'kind'],
-    #      name='django_ctct_unique_street_address',
-    #    ),
-    #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_NUM['street_addresses']),
-    #      name='django_ctct_limit_street_addresses',
-    #    ),
-    # ]
+    constraints = [
+       models.UniqueConstraint(
+         fields=['contact', 'kind'],
+         name='django_ctct_unique_street_address',
+       ),
+       # models.CheckConstraint(   # TODO: GH #8
+       #   check=Q(contact__street_addresses__count__lte=ContactRemoteManager.API_MAX_NUM['street_addresses']),
+       #   name='django_ctct_limit_street_addresses',
+       # ),
+    ]
 
   def __str__(self) -> str:
     field_names = ['street', 'city', 'state']
@@ -856,16 +856,16 @@ class ContactCustomField(models.Model):
     verbose_name = _('Custom Field')
     verbose_name_plural = _('Custom Fields')
 
-    # constraints = [
-    #    models.UniqueConstraint(  # TODO: GH #7
-    #      fields=['contact', 'custom_field'],
-    #      name='django_ctct_unique_custom_field',
-    #    ),
-    #    models.CheckConstraint(   # TODO: GH #8
-    #      check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_NUM['custom_fields']),
-    #      name='django_ctct_limit_custom_fields',
-    #    ),
-    # ]
+    constraints = [
+       models.UniqueConstraint(
+         fields=['contact', 'custom_field'],
+         name='django_ctct_unique_custom_field',
+       ),
+       # models.CheckConstraint(   # TODO: GH #8
+       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_NUM['custom_fields']),
+       #   name='django_ctct_limit_custom_fields',
+       # ),
+    ]
 
   def __str__(self) -> str:
     try:
@@ -913,7 +913,7 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   # API editable fields
   name = models.CharField(
     max_length=API_MAX_LENGTH['name'],
-    # unique=True,  # TODO: GH #7
+    unique=True,
     verbose_name=_('Name'),
   )
   scheduled_datetime = models.DateTimeField(

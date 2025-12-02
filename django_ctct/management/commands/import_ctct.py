@@ -86,8 +86,9 @@ class Command(BaseCommand):
       update_conflicts = False
       unique_fields = update_fields = None
     elif issubclass(model, ContactCustomField):
-      update_conflicts = False
-      unique_fields = update_fields = None
+      update_conflicts = True
+      unique_fields = ['contact_id', 'custom_field_id']
+      update_fields = ['value']
     elif issubclass(model, CampaignSummary):
       update_conflicts = True
       unique_fields = ['campaign_id']
