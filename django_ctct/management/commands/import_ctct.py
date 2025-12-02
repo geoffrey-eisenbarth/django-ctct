@@ -252,12 +252,7 @@ class Command(BaseCommand):
 
     # First, make sure all CampaignActivity API id's are stored locally
     EmailCampaign.remote.connect()
-    for campaign in EmailCampaign.objects.exclude(
-      api_id__isnull=True,
-    ).filter(
-      campaign_activities__role='primary_email',
-      campaign_activities__api_id__isnull=True,
-    ):
+    for campaign in EmailCampaign.objects.exclude(api_id__isnull=True):
       # Fetch from API
       assert isinstance(campaign.api_id, UUID)
       try:
