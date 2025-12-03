@@ -166,14 +166,24 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
     return data
 
 
-class CTCTModel(Model):
-  """Common CTCT model methods and properties."""
-
+class SerialModel(Model):
   API_ID_LABEL: str
   API_EDITABLE_FIELDS: tuple[str, ...] = tuple()
   API_READONLY_FIELDS: tuple[str, ...] = (
     'api_id',
   )
+
+  # Must explicitly specify both
+  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  serializer: ClassVar[Serializer[Self]] = Serializer()
+
+  class Meta:
+    abstract = True
+
+
+class CTCTModel(SerialModel):
+  """Common CTCT model methods and properties."""
+
   API_MAX_LENGTH: dict[str, int] = {}
 
   api_id = models.UUIDField(
@@ -182,10 +192,6 @@ class CTCTModel(Model):
     unique=True,   # Note: None != None for uniqueness check
     verbose_name=_('API ID'),
   )
-
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
-  serializer: ClassVar[Serializer[Self]] = Serializer()
 
   class Meta:
     abstract = True
@@ -289,6 +295,66 @@ class ContactList(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     return self.name
 
 
+class ContactCustomField(SerialModel):
+  """Django implementation of a CTCT Contact's CustomField.
+
+  Notes
+  -----
+  CTCT does not provide UUIDs for these, so we do not inherit from CTCTModel.
+
+  """
+
+  API_EDITABLE_FIELDS = (
+    'value',
+  )
+  API_READONLY_FIELDS = (
+    'custom_field_id',
+  )
+  API_MAX_LENGTH = {
+    'value': 255,
+  }
+
+  contact = models.ForeignKey(
+    'Contact',
+    related_name='custom_fields',
+    on_delete=models.CASCADE,
+    verbose_name=_('Contact'),
+  )
+  custom_field = models.ForeignKey(
+    'CustomField',
+    related_name='contacts',
+    on_delete=models.CASCADE,
+    verbose_name=_('Field'),
+  )
+
+  value = models.CharField(
+    max_length=API_MAX_LENGTH['value'],
+    verbose_name=_('Value'),
+  )
+
+  class Meta:
+    verbose_name = _('Custom Field')
+    verbose_name_plural = _('Custom Fields')
+
+    constraints = [
+       models.UniqueConstraint(
+         fields=['contact', 'custom_field'],
+         name='django_ctct_unique_custom_field',
+       ),
+       # models.CheckConstraint(   # TODO: GH #8
+       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_NUM['custom_fields']),
+       #   name='django_ctct_limit_custom_fields',
+       # ),
+    ]
+
+  def __str__(self) -> str:
+    try:
+      s = f'[{self.custom_field.label}] {self.value}'
+    except CustomField.DoesNotExist:
+      s = super().__str__()
+    return s
+
+
 class CustomField(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   """Django implementation of a CTCT Contact's CustomField."""
 
@@ -303,13 +369,11 @@ class CustomField(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   )
   API_READONLY_FIELDS = (
     'api_id',
-    'name',
     'created_at',
     'updated_at',
   )
   API_MAX_LENGTH = {
     'label': 50,
-    'name': 50,
   }
 
   TYPES = (
@@ -320,6 +384,7 @@ class CustomField(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   # API editable fields
   label = models.CharField(
     max_length=API_MAX_LENGTH['label'],
+    unique=True,
     verbose_name=_('Label'),
     help_text=_(
       'The display name for the custom_field shown in the UI as free-form text'
@@ -465,6 +530,10 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     related_name='members',
     verbose_name=_('List Memberships'),
     blank=True,
+  )
+  custom_field_set = models.ManyToManyField(
+    CustomField,
+    through=ContactCustomField,  # c.f. django-stubs GH PR #1719
   )
 
   permission_to_send = models.CharField(
@@ -814,65 +883,6 @@ class ContactStreetAddress(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
   @classmethod
   def clean_remote_country(cls, data: JsonDict) -> str:
     return cls.clean_remote_string('country', data)
-
-
-# TODO: GH #14
-class ContactCustomField(models.Model):
-  """Django implementation of a CTCT Contact's CustomField.
-
-  Notes
-  -----
-  CTCT does not provide UUIDs for these, so we do not inherit from CTCTModel.
-
-  """
-
-  API_EDITABLE_FIELDS = (
-    'custom_field_id',
-    'value',
-  )
-  API_MAX_LENGTH = {
-    'value': 255,
-  }
-
-  contact = models.ForeignKey(
-    Contact,
-    on_delete=models.CASCADE,
-    related_name='custom_fields',
-    verbose_name=_('Contact'),
-  )
-  custom_field = models.ForeignKey(
-    CustomField,
-    on_delete=models.CASCADE,
-    related_name='contacts',
-    verbose_name=_('Field'),
-  )
-
-  value = models.CharField(
-    max_length=API_MAX_LENGTH['value'],
-    verbose_name=_('Value'),
-  )
-
-  class Meta:
-    verbose_name = _('Custom Field')
-    verbose_name_plural = _('Custom Fields')
-
-    constraints = [
-       models.UniqueConstraint(
-         fields=['contact', 'custom_field'],
-         name='django_ctct_unique_custom_field',
-       ),
-       # models.CheckConstraint(   # TODO: GH #8
-       #   check=Q(contact__custom_fields__count__lte=ContactRemoteManager.API_MAX_NUM['custom_fields']),
-       #   name='django_ctct_limit_custom_fields',
-       # ),
-    ]
-
-  def __str__(self) -> str:
-    try:
-      s = f'[{self.custom_field.label}] {self.value}'
-    except CustomField.DoesNotExist:
-      s = super().__str__()
-    return s
 
 
 class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):

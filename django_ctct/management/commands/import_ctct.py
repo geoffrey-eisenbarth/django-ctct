@@ -139,70 +139,28 @@ class Command(BaseCommand):
 
     return objs_w_pks
 
-  def set_direct_object_pks(
-    self,
-    model: Type[M],
-    instances: list[M],
-  ) -> None:
-    """Sets Django pk values for OneToOne and ForeignKeys objects."""
-
-    otos, _, fks, _ = get_related_fields(model)
-
-    fields = otos + fks
-    for field in fields:
-      if id_to_pk := self.get_id_to_pk(field.related_model):
-        for o in instances:
-          setattr(o, field.attname, id_to_pk[str(getattr(o, field.attname))])
-
   def set_related_object_pks(
     self,
-    model: Type[M],
+    model: Type[E],
     objs_w_pks: list[M],
     per_obj_list_of_related_objs: list[list[RelatedObjects]],
   ) -> None:
-    """Sets Django pk values for ManyToMany and ReverseForeignKey objects."""
-
-    if not any(per_obj_list_of_related_objs):
-      return
-
-    _, m2ms, _, rfks = get_related_fields(model)
-
-    m2m_attnames = {
-      field.remote_field.through: (
-        field.m2m_column_name(), field.m2m_reverse_name()
-      )
-      for field in m2ms
-    }
-    if m2ms:
-      id_to_pk = {
-        m2m.remote_field.through: self.get_id_to_pk(m2m.related_model)
-        for m2m in m2ms
-      }
-
-    rfk_attnames = {
-      rel.related_model: rel.field.attname
-      for rel in rfks
+    _, mtms, _, rfks = get_related_fields(model)
+    field_name = {
+      field.remote_field.through: field.m2m_field_name()
+      for field in mtms
+    } | {
+      field.related_model: field.remote_field.name
+      for field in rfks
     }
 
-    if model is Contact:
-      # TODO: GH #14 ContactCustomField is kind of a ManyToMany
-      m2m_attnames[ContactCustomField] = (
-        rfk_attnames.pop(ContactCustomField), 'custom_field_id'
-      )
-      id_to_pk[ContactCustomField] = self.get_id_to_pk(CustomField)
-
-    for obj_w_pk, list_of_related_objs in zip(objs_w_pks, per_obj_list_of_related_objs):  # noqa: E501
-      for related_model, objs in list_of_related_objs:
-        if m2m_attname := m2m_attnames.get(related_model):
-          column_name, reverse_name = m2m_attname
-          for o in objs:
-            api_id = str(getattr(o, reverse_name))
-            setattr(o, column_name, obj_w_pk.pk)
-            setattr(o, reverse_name, id_to_pk[related_model][api_id])
-
-        elif rfk_attname := rfk_attnames.get(related_model):
-          for o in objs:
-            setattr(o, rfk_attname, obj_w_pk.pk)
+    for obj_w_pk, list_of_related_objs in zip(
+      objs_w_pks,
+      per_obj_list_of_related_objs,
+    ):
+      for related_model, related_objs in list_of_related_objs:
+        for related_obj in related_objs:
+          setattr(related_obj, field_name[related_model], obj_w_pk)
 
   def import_model(self, model: Type[E]) -> None:
     """Imports objects from CTCT into Django's database."""
@@ -224,18 +182,16 @@ class Command(BaseCommand):
       # No values returned
       return
 
-    # Convert API id to Django pks
-    self.set_direct_object_pks(model, objs)
-
     # Upsert models to get Django pks
     objs_w_pks = self.upsert(model, objs)
 
-    # Convert API ids to Django pks for related objects
-    self.set_related_object_pks(
-      model,
-      objs_w_pks,
-      per_obj_list_of_related_objs,
-    )
+    # Set Django object PK on related objects
+    if any(per_obj_list_of_related_objs):
+      self.set_related_object_pks(
+        model,
+        objs_w_pks,
+        per_obj_list_of_related_objs,
+      )
 
     # Reshape related_objs for efficiency
     dict_of_related_objs = defaultdict(list)
@@ -301,12 +257,13 @@ class Command(BaseCommand):
       update_fields=['role', 'subject', 'preheader', 'html_content']
     )
 
-    # Convert API id to Django pk for related objects
-    self.set_related_object_pks(
-      CampaignActivity,
-      objs_w_pks,
-      per_obj_list_of_related_objs,
-    )
+    # Set Django object PK on related objects
+    if any(per_obj_list_of_related_objs):
+      self.set_related_object_pks(
+        CampaignActivity,
+        objs_w_pks,
+        per_obj_list_of_related_objs,
+      )
 
     # Reshape related_objs for efficiency
     dict_of_related_objs = defaultdict(list)

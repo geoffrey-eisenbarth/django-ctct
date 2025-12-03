@@ -171,6 +171,11 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='contact',
+            name='custom_field_set',
+            field=models.ManyToManyField(through='django_ctct.ContactCustomField', to='django_ctct.customfield'),
+        ),
+        migrations.AddField(
+            model_name='contact',
             name='list_memberships',
             field=models.ManyToManyField(blank=True, related_name='members', to='django_ctct.contactlist', verbose_name='List Memberships'),
         ),

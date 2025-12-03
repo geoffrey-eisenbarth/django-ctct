@@ -32,7 +32,7 @@ from django_ctct.vendor import mute_signals
 if TYPE_CHECKING:
   from django_ctct.models import (
     JsonDict, RelatedObjects,
-    EndpointMixin, CTCTModel, CTCTEndpointModel,
+    EndpointMixin, SerialModel, CTCTModel, CTCTEndpointModel,
     Token, ContactList, Contact,
     EmailCampaign, CampaignActivity, CampaignSummary,
   )
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 T = TypeVar('T', bound='EndpointMixin')
 E = TypeVar('E', bound='CTCTEndpointModel')
 C = TypeVar('C', bound='CTCTModel')
+S = TypeVar('S', bound='SerialModel')
 
 
 class ConnectionManagerMixin(Manager[T]):
@@ -183,13 +184,13 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
     return token
 
 
-class Serializer(Manager[C]):
+class Serializer(Manager[S]):
 
   TS_FORMAT: ClassVar[str] = '%Y-%m-%dT%H:%M:%SZ'
 
   def serialize(
     self,
-    obj: C,
+    obj: S,
     field_types: Literal['editable', 'readonly', 'all'] = 'editable',
   ) -> JsonDict:
     """Convert from Django object to API request body."""
@@ -295,54 +296,50 @@ class Serializer(Manager[C]):
   ) -> tuple[JsonDict, list[RelatedObjects]]:
     """Deserialize ManyToManyFields and ReverseForeignKeys."""
 
-    from django_ctct.models import is_ctct, is_model
+    from django_ctct.models import is_model, is_serial
 
+    related_objs: RelatedObjects
     list_of_related_objs: list[RelatedObjects] = []
-    objs: list[Model]
+    objs: list[models.Model]
 
     _, m2ms, _, rfks = get_related_fields(self.model)
     for rfk_field in filter(lambda f: f.name in data, rfks):
       # Reverse ForeignKeys get deserialized into model instances
-      related_model = rfk_field.related_model
+      RelatedModel = rfk_field.related_model
       parent = {rfk_field.remote_field.attname: parent_pk}
-
-      if is_model(related_model) and (
-        related_model.__name__ == 'ContactCustomField'
-      ):
-        # TODO: GH #14
+      if is_serial(RelatedModel):
         objs = [
-          related_model(**datum | parent)
-          for datum in data.pop(rfk_field.name)
-        ]
-      elif is_ctct(related_model):
-        objs = [
-          related_model.serializer.deserialize(datum | parent)[0]
+          RelatedModel.serializer.deserialize(datum | parent)[0]
           for datum in data.pop(rfk_field.name)
         ]
       else:
         continue
 
       if objs:
-        related_objs = (related_model, objs)
+        related_objs = (RelatedModel, objs)
         list_of_related_objs.append(related_objs)
 
     for m2m_field in filter(lambda f: f.name in data, m2ms):
       # ManyToManyFields get deserialized into "through model" instances
-      # TODO: GH #12, why are we setting contact_id = api_id?
-      through_model = m2m_field.remote_field.through
-      if through_model is None:
-        continue
+      # NOTE: Contact.custom_field_set is handled by rfk of ContactCustomField
+      ThroughModel = m2m_field.remote_field.through
+      RelatedModel = m2m_field.related_model
 
-      objs = [
-        through_model(**{
-          m2m_field.m2m_column_name(): data['api_id'],
-          m2m_field.m2m_reverse_name(): related_obj_api_id,
-        })
-        for related_obj_api_id in data.pop(m2m_field.name)
-      ]
-      if objs:
-        related_objs = (through_model, objs)
-        list_of_related_objs.append(related_objs)
+      if is_model(ThroughModel) and is_model(RelatedModel):
+        related_obj_pks = RelatedModel.objects.filter(  # type: ignore
+          api_id__in=data.pop(m2m_field.name)
+        ).values_list('pk', flat=True)
+
+        objs = [
+          ThroughModel(**{
+            m2m_field.m2m_column_name(): parent_pk,  # Might be None
+            m2m_field.m2m_reverse_name(): related_obj_pk,
+          })
+          for related_obj_pk in related_obj_pks
+        ]
+        if objs:
+          related_objs = (ThroughModel, objs)
+          list_of_related_objs.append(related_objs)
 
     return (data, list_of_related_objs)
 
@@ -350,12 +347,13 @@ class Serializer(Manager[C]):
     self,
     data: JsonDict,
     pk: Optional[int] = None,
-  ) -> tuple[C, list[RelatedObjects]]:
+  ) -> tuple[S, list[RelatedObjects]]:
     """Convert from API response body to Django object."""
 
     # If API_ID_LABEL is not a model field name, it will be removed later
     data = data.copy()
-    data['api_id'] = data[self.model.API_ID_LABEL]
+    if hasattr(self.model, 'API_ID_LABEL'):
+      data['api_id'] = data[self.model.API_ID_LABEL]
 
     # Clean field values, must be done before field restriction
     model_fields = self.model._meta.get_fields()
@@ -375,6 +373,13 @@ class Serializer(Manager[C]):
       k: v for k, v in data.items()
       if k in [getattr(f, 'attname', f.name) for f in model_fields]
     }
+
+    # Convert any remaining API ids to Django PKs
+    for k, v in data.items():
+      if k.endswith('_id') and isinstance(v, str):
+        RelatedModel = self.model._meta.get_field(k).related_model
+        if RelatedModel is not None:
+          data[k] = RelatedModel.objects.get(api_id=v).pk  # type: ignore
 
     if pk:
       # Preserve unrelated db fields (e.g. EmailCampaign.send_preview)

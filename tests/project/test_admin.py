@@ -79,13 +79,13 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     obj_data = model_to_dict(obj, fields=self.model.API_EDITABLE_FIELDS)
     obj_data = {k: v for k, v in obj_data.items() if v}
 
-    # Convert ManyToMany objects to pks
+    # Convert non-inline ManyToMany objects to pks
     if obj.pk:
       for field_name, value in obj_data.items():
         if obj._meta.get_field(field_name).many_to_many:
           obj_data[field_name] = [_.pk for _ in value]
 
-    # Inline form data data
+    # Inline form data data (including the ContactCustomField M2M)
     model_admin = admin.site._registry[self.model]
     inline_admins = model_admin.get_inlines(request, obj)
     for inline_admin in inline_admins:
@@ -128,18 +128,13 @@ class ModelAdminTest(TestCRUD[E], TestCase):
           ]
 
         for i, related_obj in enumerate(related_objs):
-          if inline_admin.model is ContactCustomField:
-            # TODO: GH #14
-            # Use Django PKs not API ids
-            data = {
-              'custom_field': related_obj.custom_field.pk,
-              'value': related_obj.value,
-            }
-          else:
-            data = inline_admin.model.serializer.serialize(related_obj)
-            if inline_admin.model is CampaignActivity:
-              # Factory can't specify ManyToManyField during build()
-              data['contact_lists'] = [cl.pk for cl in self.existing_lists]
+          data = inline_admin.model.serializer.serialize(related_obj)
+          if inline_admin.model is CampaignActivity:
+            # Factory can't specify ManyToManyField during build()
+            data['contact_lists'] = [cl.pk for cl in self.existing_lists]
+          elif inline_admin.model is ContactCustomField:
+            # Make sure to use pk here
+            data['custom_field'] = related_obj.custom_field.pk
 
           for field_name, value in data.items():
             inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
