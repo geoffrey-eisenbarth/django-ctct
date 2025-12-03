@@ -141,7 +141,7 @@ class RemoteModelAdmin(
   def delete_queryset(
     self,
     request: HttpRequest,
-    queryset: QuerySet[CTCTEndpointModel],
+    queryset: QuerySet[E],
   ) -> None:
     if self.remote_sync:
       queryset.model.remote.bulk_delete(queryset)
@@ -152,7 +152,7 @@ class RemoteModelAdmin(
   def save_related(
     self,
     request: HttpRequest,
-    form: ModelForm[CTCTEndpointModel],
+    form: ModelForm[E],
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
@@ -175,7 +175,7 @@ class RemoteModelAdmin(
   def save_remotely(
     self,
     request: HttpRequest,
-    form: ModelForm[CTCTEndpointModel],
+    form: ModelForm[E],
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
@@ -570,7 +570,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
   def save_remotely(
     self,
     request: HttpRequest,
-    form: ModelForm[EmailCampaign],  # type: ignore[override]
+    form: ModelForm[EmailCampaign],
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:

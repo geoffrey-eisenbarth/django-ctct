@@ -1306,12 +1306,18 @@ class CampaignSummary(CTCTEndpointModel):
 
 
 def is_ctct(
-  val: Type[BaseModel] | Literal['self']
+  val: Type[BaseModel] | Literal['self'] | None
 ) -> TypeGuard[Type[CTCTModel]]:
   return isinstance(val, type) and issubclass(val, CTCTModel)
 
 
 def is_model(
-  val: Type[BaseModel] | Literal['self']
+  val: Type[BaseModel] | Literal['self'] | None
 ) -> TypeGuard[Type[Model]]:
   return isinstance(val, type) and issubclass(val, Model)
+
+
+def is_serial(
+   val: Type[BaseModel] | Literal['self'] | None
+) -> TypeGuard[Type[SerialModel]]:
+  return isinstance(val, type) and issubclass(val, SerialModel)

@@ -82,7 +82,7 @@ class Command(BaseCommand):
 
     if model._meta.auto_created and hasattr(model, 'contactlist_id'):
       # Delete existing through model instances
-      model.objects.all().delete()
+      model.objects.all().delete()  # type: ignore
       update_conflicts = False
       unique_fields = update_fields = None
     elif issubclass(model, ContactCustomField):
@@ -117,7 +117,7 @@ class Command(BaseCommand):
       unique_objs = objs
 
     # Perform the upsert
-    objs_w_pks = model.objects.bulk_create(
+    objs_w_pks = model.objects.bulk_create(  # type: ignore
       objs=unique_objs,
       update_conflicts=update_conflicts,
       unique_fields=unique_fields,

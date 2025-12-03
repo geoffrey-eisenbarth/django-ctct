@@ -17,7 +17,7 @@ from requests.models import Response
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.db.models import signals, Model
+from django.db.models import signals
 from django.db.models.manager import Manager
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, Http404
@@ -241,21 +241,15 @@ class Serializer(Manager[C]):
           data[field_name] = list(map(str, qs))
         elif hasattr(value.model, 'serializer'):
           # ReverseForeignKey: serialize QuerySet
+          if value.model.__name__ == 'ContactCustomField':
+            # Model behaves as a through model, must get related ids
+            field_types = 'all'
           qs = value.all()
           data[field_name] = [
             qs.model.serializer.serialize(o, field_types)
             for o in qs
           ]
-        elif value.model.__name__ == 'ContactCustomField':
-          # TODO: GH #14
-          data[field_name] = [
-            {
-              'custom_field_id': str(row['custom_field__api_id']),
-              'value': row['value'],
-            }
-            for row in value.values('custom_field__api_id', 'value')
-          ]
-      elif isinstance(value, Model):
+      elif isinstance(value, models.Model):
         raise NotImplementedError
       else:
         raise NotImplementedError
@@ -602,7 +596,7 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
 
     from django_ctct.models import is_ctct
 
-    Contact = self.model._meta.get_field('members').related_model
+    Contact = self.model._meta.get_field('members').related_model  # type: ignore # noqa: E501
     if is_ctct(Contact) and hasattr(Contact, 'API_ENDPOINT_BULK_LIMIT'):
       step_size = Contact.API_ENDPOINT_BULK_LIMIT
     else:
