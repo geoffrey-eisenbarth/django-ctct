@@ -146,7 +146,6 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     """Verify response was a redirect (a 200 response implies form errors)."""
 
     if (response.status_code == 200) and (response.context is not None):
-      breakpoint()  # check response.context_data
       # Check for form errors in a way that will display them to the dev
       form = response.context['adminform']
       self.assertFalse(form.errors or form.non_field_errors())

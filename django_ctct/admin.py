@@ -51,7 +51,7 @@ def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
       if getattr(settings, 'CTCT_RAISE_FOR_API', False):
         raise e
       else:
-        self, request, *_ = args
+        self, request, *x = args
         assert isinstance(self, admin.ModelAdmin)
         assert isinstance(request, HttpRequest)
         self.message_user(
@@ -295,7 +295,7 @@ class ContactCustomFieldInline(
 ):
 
   model = ContactCustomField
-  excldue = ('api_id', )
+  exclude = ('api_id', )
 
   extra = 0
 

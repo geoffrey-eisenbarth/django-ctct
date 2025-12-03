@@ -423,9 +423,9 @@ class RemoteManager(
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 
+    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
       obj.save()
@@ -521,9 +521,9 @@ class RemoteManager(
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 
+    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
       obj.save()
@@ -811,9 +811,9 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    # TODO: GH #11?
     obj, _ = self.deserialize(data, pk=pk)
 
+    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
     with mute_signals(signals.post_save):
       obj.save()

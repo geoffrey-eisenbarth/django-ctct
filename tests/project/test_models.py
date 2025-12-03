@@ -313,6 +313,7 @@ class ManyToManyContactListTest(RequestsMockMixin[E], TestCase):
       json=api_response,
     )
 
+    # TODO: GH #11
     # Add a related object, triggering m2m_changed signal
     getattr(self.existing_obj, self.m2m_field_name).add(*self.contact_lists)
 
