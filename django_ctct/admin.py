@@ -580,10 +580,10 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       activity = formsets[0][0].instance
 
       # Handle remote saving the EmailCampaign
+      # NOTE: The only EmailCampaign field that can be updated is 'name'
       campaign_created = not change
       campaign_updated = change and ('name' in form.changed_data)
       if campaign_created or campaign_updated:
-        # The only EmailCampaign field that can be updated is 'name'
         remote_save(
           sender=self.model,
           instance=campaign,

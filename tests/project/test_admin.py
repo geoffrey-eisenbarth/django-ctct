@@ -71,10 +71,6 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     obj_data: JsonDict
     inline_data: JsonDict = {}
 
-    if update_related:
-      # TODO: GH #13
-      raise NotImplementedError
-
     # Primary form data
     obj_data = model_to_dict(obj, fields=self.model.API_EDITABLE_FIELDS)
     obj_data = {k: v for k, v in obj_data.items() if v}
@@ -85,7 +81,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
         if obj._meta.get_field(field_name).many_to_many:
           obj_data[field_name] = [_.pk for _ in value]
 
-    # Inline form data data (including the ContactCustomField M2M)
+    # Inline form data (including the ContactCustomField M2M)
     model_admin = admin.site._registry[self.model]
     inline_admins = model_admin.get_inlines(request, obj)
     for inline_admin in inline_admins:
@@ -103,12 +99,32 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       if obj.pk:
         # Include initial data and pks for existing related objects
         for i, form in enumerate(formset.initial_forms):
+          inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk
           for field_name, value in form.initial.items():
             if isinstance(value, (list, QuerySet)):
               # For ManyToMany, we need a list of PKs
               value = [o.pk for o in value]
-            inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+            if update_related:
+              # TODO: GH #13
+              raise NotImplementedError
+            else:
+              inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+              inline_data[f'initial-{formset.prefix}-{i}-{field_name}'] = value
+
+        for i, form in enumerate(formset.initial_forms):
           inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk
+          for field in inline_admin.model._meta.get_fields():
+            if field.name in form.initial:
+              value = form.initial[field.name]
+              if isinstance(value, (list, QuerySet)):
+                # For ManyToMany, we need a list of PKs
+                value = [o.pk for o in value]
+              inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+            elif field.default is not models.NOT_PROVIDED:
+              # Include related object defaults
+              default = '' if field.default is None else field.get_default()
+              inline_data[f'initial-{formset.prefix}-{i}-{field.name}'] = default  # noqa: E501
+
       else:
         # Include new data for related object
         related_obj_factory = get_factory(inline_admin.model)
@@ -138,6 +154,15 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
           for field_name, value in data.items():
             inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+
+          # Include defaults for new related objects
+          for field in filter(
+            lambda f: f.default is not models.NOT_PROVIDED,
+            inline_admin.model._meta.get_fields(),
+          ):
+            default = '' if field.default is None else field.get_default()
+            inline_data[f'initial-{formset.prefix}-{i}-{field.name}'] = default
+
         inline_data[f'{formset.prefix}-TOTAL_FORMS'] = len(related_objs)
 
     return obj_data, inline_data
