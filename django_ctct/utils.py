@@ -20,7 +20,9 @@ RelatedFields: TypeAlias = tuple[
 def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:
   if '.' in s:
     # Remove milliseconds
-    s = s.split('.')[0] + 'Z'
+    s = s.split('.')[0]
+  if ts_format.endswith('Z') and not s.endswith('Z'):
+    s += 'Z'
   return timezone.make_aware(dt.datetime.strptime(s, ts_format))
 
 
