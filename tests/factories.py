@@ -3,6 +3,7 @@ from typing import Type, TypeVar, Generic, Any, Optional, cast
 import factory
 import factory.fuzzy
 from factory.django import DjangoModelFactory
+from faker import Faker as RealFaker
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
@@ -112,7 +113,12 @@ class ContactStreetAddressFactory(CTCTModelFactory[ContactStreetAddress]):
   city = factory.Faker('city')
   state = factory.Faker('state_abbr')
   postal_code = factory.Faker('postcode')
-  country = factory.Faker('country')
+
+  @factory.lazy_attribute
+  def country(self):
+    max_length = ContactStreetAddress.API_MAX_LENGTH['country']
+    s = RealFaker().country()[:max_length]
+    return s
 
 
 class ContactCustomFieldFactory(DjangoModelFactory[ContactCustomField]):
