@@ -49,10 +49,10 @@ class ConnectionManagerMixin(Manager[T]):
   API_LIMIT_CALLS: int = 4   # four calls
   API_LIMIT_PERIOD: int = 1  # per second
 
-  session: request.Session | None = None
+  session: requests.Session
 
   def connect(self) -> None:
-    if self.session is None:
+    if not hasattr(self, 'session'):
       from django_ctct.models import Token
 
       token = Token.remote.get()
@@ -132,7 +132,7 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
     return url
 
   def connect(self) -> None:
-    if self.session is None:
+    if not hasattr(self, 'session'):
       self.session = requests.Session()
       self.session.auth = (settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY)
 
