@@ -149,9 +149,6 @@ To run tests:
 
 Once version 0.0.1 is released on PyPI, we hope to implement the following new features (in no particular order):
 
- * Support for API syncing using signals (`post_save`, `pre_delete`, `m2m_changed`, etc).
- This will be controlled by the `CTCT_SYNC_SIGNALS` setting.
- **Update** This probably won't work as desired since the primary object will be saved before related objects are.
  * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
  * Add `models.CheckConstraint` and `models.UniqueConstraint` constraints that are currently commented out.
   

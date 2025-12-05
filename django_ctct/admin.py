@@ -6,7 +6,6 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
-from django.db.models import signals
 from django.db.models import Model, QuerySet, When, Case, F, FloatField
 from django.db.models.functions import Cast
 from django.forms import ModelForm, BaseFormSet
@@ -24,7 +23,6 @@ from django_ctct.models import (
   EmailCampaign, CampaignActivity, CampaignSummary,
 )
 from django_ctct.signals import remote_save, remote_delete
-from django_ctct.vendor import mute_signals
 
 
 P = ParamSpec('P')
@@ -124,17 +122,13 @@ class RemoteModelAdmin(
 ):
   """Facilitate remote saving and deleting."""
 
-  # ChangeView
-  @property
-  def remote_sync(self) -> bool:
-    sync_admin = getattr(settings, 'CTCT_SYNC_ADMIN', False)
-    sync_signals = getattr(settings, 'CTCT_SYNC_SIGNALS', False)
-    return sync_admin and not sync_signals
+  sync_admin: bool = getattr(settings, 'CTCT_SYNC_ADMIN', False)
 
+  # ChangeView
   @catch_api_errors
   def delete_model(self, request: HttpRequest, obj: Model) -> None:
     obj.delete()
-    if self.remote_sync:
+    if self.sync_admin:
       remote_delete(sender=self.model, instance=obj)
 
   @catch_api_errors
@@ -143,10 +137,9 @@ class RemoteModelAdmin(
     request: HttpRequest,
     queryset: QuerySet[E],
   ) -> None:
-    if self.remote_sync:
+    if self.sync_admin:
       queryset.model.remote.bulk_delete(queryset)
-    with mute_signals(signals.pre_delete):
-      queryset.delete()
+    queryset.delete()
 
   @catch_api_errors
   def save_related(
@@ -164,9 +157,8 @@ class RemoteModelAdmin(
     for saving objects remotely.
 
     """
-    with mute_signals(signals.m2m_changed):
-      # ManyToMany information is sent to CTCT in PUT call
-      form.save_m2m()
+    # ManyToMany information is sent to CTCT in PUT call
+    form.save_m2m()
     for formset in formsets:
       self.save_formset(request, form, formset, change=change)
     self.save_remotely(request, form, formsets, change)
@@ -179,7 +171,7 @@ class RemoteModelAdmin(
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
-    if self.remote_sync:
+    if self.sync_admin:
       # Remote save the primary object after related objects have been saved
       remote_save(
         sender=self.model,
@@ -401,9 +393,8 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
         instance.author = request.user
       instance.save()
 
-    with mute_signals(signals.m2m_changed):
-      # ManyToMany information is sent to CTCT in PUT call
-      formset.save_m2m()
+    # ManyToMany information is sent to CTCT in PUT call
+    formset.save_m2m()
 
 
 class ContactNoteAuthorFilter(admin.SimpleListFilter):
@@ -574,7 +565,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     formsets: list[BaseFormSet[ModelForm[Model]]],
     change: bool,
   ) -> None:
-    if self.remote_sync:
+    if self.sync_admin:
 
       campaign = form.instance
       activity = formsets[0][0].instance

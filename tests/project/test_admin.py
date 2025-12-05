@@ -15,7 +15,6 @@ from django.test import TestCase, Client, override_settings
 from django.urls import reverse
 from django.utils.translation import gettext as _
 
-from django_ctct.vendor import mute_signals
 from django_ctct.models import (
   JsonDict, CTCTEndpointModel,
   CustomField, ContactList, Contact,
@@ -283,11 +282,10 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     )
 
     # Create objects
-    with mute_signals(models.signals.post_save):
-      num_calls = 2
-      size = self.model.API_ENDPOINT_BULK_LIMIT * num_calls
-      objs = self.factory.create_batch(size=size)
-      pks = [o.pk for o in objs]
+    num_calls = 2
+    size = self.model.API_ENDPOINT_BULK_LIMIT * num_calls
+    objs = self.factory.create_batch(size=size)
+    pks = [o.pk for o in objs]
 
     # Use ModelAdmin to perform bulk delete
     model_admin = admin.site._registry[self.model]

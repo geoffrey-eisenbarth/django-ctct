@@ -9,10 +9,8 @@ import requests_mock
 
 from django.core.management import call_command
 from django.db.models import Model
-from django.db.models.signals import post_save, pre_delete, m2m_changed
 from django.test import TestCase
 
-from django_ctct.vendor import mute_signals
 from django_ctct.models import (
   JsonDict,
   CTCTModel, CTCTEndpointModel, ContactList, CustomField, Contact,
@@ -75,54 +73,52 @@ class TestImportCommand(TestCase):
     instances: dict[Type[CTCTEndpointModel], list[CTCTModel]] = {}
     objs: Iterable[Model]
 
-    with mute_signals(post_save, pre_delete, m2m_changed):
+    for model, num_objs in self.num_objs.items():
+      if model is CampaignActivity:
+        # These were already created with EmailCampaignFactory
+        objs = CampaignActivity.objects.filter(role='primary_email')
+      elif model is CampaignSummary:
+        # These were already created with EmailCampaignFactory
+        objs = CampaignSummary.objects.all()
+      else:
+        # Create new instances
+        objs = get_factory(model).create_batch(num_objs)
 
-      for model, num_objs in self.num_objs.items():
-        if model is CampaignActivity:
-          # These were already created with EmailCampaignFactory
-          objs = CampaignActivity.objects.filter(role='primary_email')
-        elif model is CampaignSummary:
-          # These were already created with EmailCampaignFactory
-          objs = CampaignSummary.objects.all()
-        else:
-          # Create new instances
-          objs = get_factory(model).create_batch(num_objs)
+      instances[model] = cast(list[CTCTModel], objs)
 
-        instances[model] = cast(list[CTCTModel], objs)
+      if model is Contact:
+        # Set ManyToMany relationships
+        for contact in objs:
+          memberships = cast(
+            list[ContactList],
+            random.sample(instances[ContactList], random.randint(1, 10))
+          )
+          cast(Contact, contact).list_memberships.set(memberships)
 
-        if model is Contact:
-          # Set ManyToMany relationships
-          for contact in objs:
-            memberships = cast(
-              list[ContactList],
-              random.sample(instances[ContactList], random.randint(1, 10))
+          for custom_field in instances[CustomField]:
+            get_factory(ContactCustomField).create(
+              contact=contact,
+              custom_field=custom_field,
             )
-            cast(Contact, contact).list_memberships.set(memberships)
 
-            for custom_field in instances[CustomField]:
-              get_factory(ContactCustomField).create(
-                contact=contact,
-                custom_field=custom_field,
-              )
+    # Serialize instances
+    for model, objs in instances.items():
+      if model is CampaignActivity:
+        # Since EmailCampaign has been stored, we can now set contact_lists
+        for obj in objs:
+          recipients = cast(
+            list[ContactList],
+            random.sample(instances[ContactList], random.randint(1, 10))
+          )
+          cast(CampaignActivity, obj).contact_lists.set(recipients)
 
-      # Serialize instances
-      for model, objs in instances.items():
-        if model is CampaignActivity:
-          # Since EmailCampaign has been stored, we can now set contact_lists
-          for obj in objs:
-            recipients = cast(
-              list[ContactList],
-              random.sample(instances[ContactList], random.randint(1, 10))
-            )
-            cast(CampaignActivity, obj).contact_lists.set(recipients)
+      # Serialize and store
+      serializer = partial(model.serializer.serialize, field_types='all')
+      self.data[model] = list(map(serializer, objs))
 
-        # Serialize and store
-        serializer = partial(model.serializer.serialize, field_types='all')
-        self.data[model] = list(map(serializer, objs))
-
-      # Delete objects
-      for model in self.models:
-        model.objects.all().delete()
+    # Delete objects
+    for model in self.models:
+      model.objects.all().delete()
 
   def get_api_url(
     self,

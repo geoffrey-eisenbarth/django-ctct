@@ -17,7 +17,6 @@ from requests.models import Response
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.db.models import signals
 from django.db.models.manager import Manager
 from django.db.models.query import QuerySet
 from django.http import HttpRequest, Http404
@@ -26,7 +25,6 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.utils import get_related_fields
-from django_ctct.vendor import mute_signals
 
 
 if TYPE_CHECKING:
@@ -434,10 +432,8 @@ class RemoteManager(
     #       set locally before the API request.
     obj, _ = self.deserialize(data, pk=pk)
 
-    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
-    with mute_signals(signals.post_save):
-      obj.save()
+    obj.save()
 
     return obj
 
@@ -532,10 +528,8 @@ class RemoteManager(
     #       set locally before the API request.
     obj, _ = self.deserialize(data, pk=pk)
 
-    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
-    with mute_signals(signals.post_save):
-      obj.save()
+    obj.save()
 
     return obj
 
@@ -704,9 +698,8 @@ class ContactRemoteManager(RemoteManager['Contact']):
       raise ValueError(f'Unexpected response data: {data}.')
 
     # Save the API id
-    with mute_signals(signals.post_save):
-      obj.api_id = api_id
-      obj.save(update_fields=['api_id'])
+    obj.api_id = api_id
+    obj.save(update_fields=['api_id'])
 
     return obj
 
@@ -780,13 +773,12 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
             break
 
     # Overwrite local obj with CTCT's response
-    with mute_signals(signals.post_save):
-      obj.save()
-      if activity.pk is None:
-        activity.campaign = obj
-        activity.save()
-      else:
-        activity.save(update_fields=['api_id'])
+    obj.save()
+    if activity.pk is None:
+      activity.campaign = obj
+      activity.save()
+    else:
+      activity.save(update_fields=['api_id'])
 
     # Send preview and/or schedule the campaign
     if obj.send_preview or (obj.scheduled_datetime is not None):
@@ -822,10 +814,8 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     #       set locally before the API request.
     obj, _ = self.deserialize(data, pk=pk)
 
-    # TODO: GH #11?
     # Overwrite local obj with CTCT's response
-    with mute_signals(signals.post_save):
-      obj.save()
+    obj.save()
 
     return obj
 

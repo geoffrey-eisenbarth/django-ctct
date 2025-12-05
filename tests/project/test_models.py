@@ -7,7 +7,6 @@ from parameterized import parameterized_class
 import requests_mock
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db import models
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -18,8 +17,7 @@ from django_ctct.models import (
   Contact, ContactCustomField,
   EmailCampaign, CampaignActivity,
 )
-from django_ctct.signals import remote_save, remote_delete, remote_update_m2m
-from django_ctct.vendor import mute_signals
+from django_ctct.signals import remote_save, remote_delete
 
 from tests.factories import get_factory, TokenFactory
 
@@ -49,26 +47,22 @@ class RequestsMockMixin(Generic[E]):
       self.existing_lists = get_factory(ContactList).create_batch(2)
       self.contact_lists = get_factory(ContactList).create_batch(2)
 
-    with mute_signals(
-      models.signals.post_save,
-      models.signals.m2m_changed,  # TODO: GH #15
-    ):
-      self.existing_obj = self.factory.create()
+    self.existing_obj = self.factory.create()
 
-      if isinstance(self.existing_obj, Contact):
-        self.existing_obj.list_memberships.set(self.existing_lists)
+    if isinstance(self.existing_obj, Contact):
+      self.existing_obj.list_memberships.set(self.existing_lists)
 
-        for custom_field in self.custom_fields:
-          get_factory(ContactCustomField).create(
-            contact=self.existing_obj,
-            custom_field=custom_field,
-          )
+      for custom_field in self.custom_fields:
+        get_factory(ContactCustomField).create(
+          contact=self.existing_obj,
+          custom_field=custom_field,
+        )
 
-      elif isinstance(self.existing_obj, EmailCampaign):
-        primary_email = self.existing_obj.campaign_activities.get()
-        primary_email.contact_lists.set(self.existing_lists)
-      elif isinstance(self.existing_obj, CampaignActivity):
-        self.existing_obj.contact_lists.set(self.existing_lists)
+    elif isinstance(self.existing_obj, EmailCampaign):
+      primary_email = self.existing_obj.campaign_activities.get()
+      primary_email.contact_lists.set(self.existing_lists)
+    elif isinstance(self.existing_obj, CampaignActivity):
+      self.existing_obj.contact_lists.set(self.existing_lists)
 
   def tearDown(self) -> None:
     self.mock_api.stop()
