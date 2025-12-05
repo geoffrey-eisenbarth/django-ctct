@@ -15,8 +15,6 @@ def remote_save(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
     issubclass(sender, CTCTEndpointModel) and
     isinstance(instance, CTCTEndpointModel)
   ):
-    sender.remote.connect()
-
     if instance.api_id:
       task = sender.remote.update
     else:
@@ -36,8 +34,6 @@ def remote_delete(sender: Type[Model], instance: Model, **kwargs: Any) -> None:
     issubclass(sender, CTCTEndpointModel) and
     isinstance(instance, CTCTEndpointModel)
   ):
-    sender.remote.connect()
-
     task = sender.remote.delete
 
     enqueue = getattr(settings, 'CTCT_ENQUEUE_DEFAULT', False)
@@ -82,7 +78,6 @@ def remote_update_m2m(
         raise NotImplementedError
 
     model = cast(Type[CTCTEndpointModel], instance._meta.model)
-    model.remote.connect()
 
     task = getattr(model.remote, task_name)
 

@@ -9,7 +9,6 @@ def auth(request: HttpRequest) -> HttpResponse:
   """Facilitates OAuth2 authentication with CTCT."""
 
   if auth_code := request.GET.get('code'):
-    Token.remote.connect()
     try:
       Token.remote.create(auth_code)
     except Exception as e:

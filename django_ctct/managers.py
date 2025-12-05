@@ -49,20 +49,27 @@ class ConnectionManagerMixin(Manager[T]):
   API_LIMIT_CALLS: int = 4   # four calls
   API_LIMIT_PERIOD: int = 1  # per second
 
-  def connect(self) -> None:
-    from django_ctct.models import Token
+  session: request.Session | None = None
 
-    token = Token.remote.get()
-    self.session = requests.Session()
-    self.session.headers.update({
-      'Authorization': f"{token.token_type} {token.access_token}"
-    })
+  def connect(self) -> None:
+    if self.session is None:
+      from django_ctct.models import Token
+
+      token = Token.remote.get()
+      self.session = requests.Session()
+      self.session.headers.update({
+        'Authorization': f"{token.token_type} {token.access_token}"
+      })
 
   @sleep_and_retry
   @limits(calls=API_LIMIT_CALLS, period=API_LIMIT_PERIOD)
   def check_api_limit(self) -> None:
     """Honor the API's rate limit."""
     pass
+
+  def _pre_api_call(self) -> None:
+    self.connect()
+    self.check_api_limit()
 
   def get_url(
     self,
@@ -125,8 +132,9 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
     return url
 
   def connect(self) -> None:
-    self.session = requests.Session()
-    self.session.auth = (settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY)
+    if self.session is None:
+      self.session = requests.Session()
+      self.session.auth = (settings.CTCT_PUBLIC_KEY, settings.CTCT_SECRET_KEY)
 
   def create(self, auth_code: str) -> 'Token':  # type: ignore[override]
     """Creates the initial Token using an `auth_code` from CTCT.
@@ -138,6 +146,7 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
 
     """
 
+    self.connect()
     response = self.session.post(
       url=self.get_url(),
       data={
@@ -164,7 +173,6 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
     try:
       token.decode()
     except ExpiredSignatureError:
-      self.connect()
       token = self.update(token)
 
     return token
@@ -172,6 +180,7 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
   def update(self, token: 'Token') -> 'Token':  # type: ignore[override]
     """Obtain a new Token from CTCT using the refresh code."""
 
+    self.connect()
     response = self.session.post(
       url=self.get_url(),
       data={
@@ -414,7 +423,7 @@ class RemoteManager(
     if not (pk := obj.pk):
       raise ValueError('Must create object locally first.')
 
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.post(
       url=self.get_url(),
       json=self.serialize(obj),
@@ -445,7 +454,7 @@ class RemoteManager(
 
     """
 
-    self.check_api_limit()
+    self._pre_api_call()
 
     response = self.session.get(
       url=self.get_url(api_id),
@@ -476,7 +485,7 @@ class RemoteManager(
 
     paginated = True
     while paginated:
-      self.check_api_limit()
+      self._pre_api_call()
 
       response = self.session.get(
         url=self.get_url(endpoint=endpoint),
@@ -512,7 +521,7 @@ class RemoteManager(
     elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
 
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.put(
       url=self.get_url(obj.api_id),
       json=self.serialize(obj),
@@ -549,7 +558,7 @@ class RemoteManager(
     """
 
     url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.delete(url)
 
     if response.status_code != 404:
@@ -579,7 +588,7 @@ class RemoteManager(
 
     # Remote delete in batches
     for i in range(0, len(api_ids), self.model.API_ENDPOINT_BULK_LIMIT):
-      self.check_api_limit()
+      self._pre_api_call()
       response = self.session.post(
         url=self.get_url(endpoint=self.model.API_ENDPOINT_BULK_DELETE),
         json={api_id_label: api_ids[i:i + self.model.API_ENDPOINT_BULK_LIMIT]},
@@ -627,7 +636,7 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
       raise ValueError(message)
 
     for i in range(0, len(contact_ids), step_size):
-      self.check_api_limit()
+      self._pre_api_call()
       response = self.session.post(
         url=self.get_url(endpoint='/activities/add_list_memberships'),
         json={
@@ -682,7 +691,7 @@ class ContactRemoteManager(RemoteManager['Contact']):
     data = self.serialize(obj)
     data['email_address'] = data.pop('email_address')['address']
 
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.post(
       url=self.get_url(endpoint_suffix='/sign_up_form'),
       json=data,
@@ -746,7 +755,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
       activity = CampaignActivity()
 
     # Create EmailCampaign and CampaignActivity remotely
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.post(
       url=self.get_url(),
       json={
@@ -802,7 +811,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
 
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.patch(
       url=self.get_url(obj.api_id),
       json=self.serialize(obj),
@@ -881,7 +890,7 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
     if message is None:
       message = getattr(settings, 'CTCT_PREVIEW_MESSAGE', '')
 
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.post(
       url=self.get_url(obj.api_id, endpoint_suffix='/tests'),
       json={
@@ -922,7 +931,7 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
       raise ValueError(message)
 
     # Schedule the CampaignActivity
-    self.check_api_limit()
+    self._pre_api_call()
     response = self.session.post(
       url=self.get_url(obj.api_id, endpoint_suffix='/schedules'),
       json={'scheduled_date': obj.campaign.scheduled_datetime.isoformat()},

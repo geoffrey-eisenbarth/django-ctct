@@ -173,7 +173,6 @@ class Command(BaseCommand):
       # CampaignActivities do not have a bulk API endpoint
       return self.import_campaign_activities()
 
-    model.remote.connect()
     try:
       # Split apart so we can save objs to db and get pks
       list_of_tuples = model.remote.all()
@@ -207,7 +206,6 @@ class Command(BaseCommand):
     """CampaignActivities must be imported one at a time."""
 
     # First, make sure all CampaignActivity API id's are stored locally
-    EmailCampaign.remote.connect()
     for campaign in EmailCampaign.objects.exclude(api_id__isnull=True):
       # Fetch from API
       assert isinstance(campaign.api_id, UUID)
@@ -226,8 +224,6 @@ class Command(BaseCommand):
                 obj.save()
 
     # Then, fetch CampaignActivity details
-    CampaignActivity.remote.connect()
-
     activities = CampaignActivity.objects.filter(
       role='primary_email',
       api_id__isnull=False,
