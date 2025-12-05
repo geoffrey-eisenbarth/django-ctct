@@ -967,6 +967,18 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
       return last_sent_date
 
 
+def campaign_activity__from_name__default() -> str:
+  return settings.CTCT_FROM_NAME
+
+
+def campaign_activity__from_email__default() -> str:
+  return settings.CTCT_FROM_EMAIL
+
+
+def campaign_activity__reply_to_email__default() -> str:
+  return getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL)
+
+
 class CampaignActivity(CTCTEndpointModel):
   """Django implementation of a CTCT CampaignActivity.
 
@@ -1045,17 +1057,17 @@ class CampaignActivity(CTCTEndpointModel):
   # API editable fields
   from_name = models.CharField(
     max_length=API_MAX_LENGTH['from_name'],
-    default=settings.CTCT_FROM_NAME,
+    default=campaign_activity__from_name__default,
     verbose_name=_('From Name'),
   )
   from_email = models.EmailField(
     max_length=API_MAX_LENGTH['from_email'],
-    default=settings.CTCT_FROM_EMAIL,
+    default=campaign_activity__from_email__default,
     verbose_name=_('From Email'),
   )
   reply_to_email = models.EmailField(
     max_length=API_MAX_LENGTH['reply_to_email'],
-    default=getattr(settings, 'CTCT_REPLY_TO_EMAIL', settings.CTCT_FROM_EMAIL),
+    default=campaign_activity__reply_to_email__default,
     verbose_name=_('Reply-to Email'),
   )
   subject = models.CharField(
@@ -1103,7 +1115,7 @@ class CampaignActivity(CTCTEndpointModel):
   # but imports could have other values
   format_type = models.IntegerField(
     choices=FORMAT_TYPES,
-    default=5,  # CustomCode API v3
+    default=FORMAT_TYPES[4][0],  # evals to 5
     verbose_name=_('Format Type'),
   )
 
