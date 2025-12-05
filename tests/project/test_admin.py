@@ -100,16 +100,19 @@ class ModelAdminTest(TestCRUD[E], TestCase):
         # Include initial data and pks for existing related objects
         for i, form in enumerate(formset.initial_forms):
           inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk
-          for field_name, value in form.initial.items():
-            if isinstance(value, (list, QuerySet)):
+          for field_name, initial_value in form.initial.items():
+            if isinstance(initial_value, (list, QuerySet)):
               # For ManyToMany, we need a list of PKs
-              value = [o.pk for o in value]
+              value = [o.pk for o in initial_value]
+
             if update_related:
               # TODO: GH #13
               raise NotImplementedError
             else:
-              inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
-              inline_data[f'initial-{formset.prefix}-{i}-{field_name}'] = value
+              value = initial_value
+
+            inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+            inline_data[f'initial-{formset.prefix}-{i}-{field_name}'] = initial_value  # noqa: E501
 
         for i, form in enumerate(formset.initial_forms):
           inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk

@@ -173,7 +173,6 @@ class TestCRUD(RequestsMockMixin[E]):
     token_decode.return_value = True
 
     # Update some values (must be done before getting api_response)
-    update_related = False  # TODO: GH #13
     other_obj = self.factory.build()
     other_obj_data = self.model.serializer.serialize(
       obj=other_obj,
@@ -193,16 +192,16 @@ class TestCRUD(RequestsMockMixin[E]):
       status_code=200,
       json=api_response,
     )
+
+    update_related = False  # TODO: GH #13
     if isinstance(self.existing_obj, EmailCampaign) and update_related:
       # Set up the mock request for updating the CampaignActivity
-      # TODO: GH #13
       campaign_activity = self.existing_obj.campaign_activities.get(role='primary_email')  # noqa: E501
       self.mock_api.put(
         url=CampaignActivity.remote.get_url(api_id=campaign_activity.api_id),
         status_code=200,
         json={},
       )
-      raise NotImplementedError
       num_requests = 2
     else:
       num_requests = 1
