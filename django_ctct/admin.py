@@ -1,5 +1,5 @@
 import functools
-from typing import TypeVar, ParamSpec, Generic, Optional, Callable, Iterable
+from typing import TypeVar, ParamSpec, Generic, Callable, Iterable
 from requests.exceptions import HTTPError
 
 from django import forms
@@ -79,7 +79,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
   def has_add_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Model] = None,
+    obj: Model | None = None,
   ) -> bool:
     """Prevent creation in the Django admin."""
     return False
@@ -87,7 +87,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Model] = None,
+    obj: Model | None = None,
   ) -> bool:
     """Prevent updates in the Django admin."""
     return False
@@ -95,7 +95,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
   def get_readonly_fields(
     self,
     request: HttpRequest,
-    obj: Optional[Model] = None,
+    obj: Model | None = None,
   ) -> tuple[str, ...]:
     """Prevent updates in the Django admin."""
     if obj is not None:
@@ -111,7 +111,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
   def has_delete_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Model] = None,
+    obj: Model | None = None,
   ) -> bool:
     """Allow superusers to delete objects."""
     return request.user.is_superuser
@@ -277,7 +277,7 @@ class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Contact] = None,  # type: ignore[override]
+    obj: Contact | None = None,  # type: ignore[override]
   ) -> bool:
     return False
 
@@ -362,7 +362,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
   def get_readonly_fields(
     self,
     request: HttpRequest,
-    obj: Optional[Contact] = None,
+    obj: Contact | None = None,
   ) -> list[str]:
     readonly_fields = list(Contact.API_READONLY_FIELDS)
     if obj and obj.opt_out_source and not request.user.is_superuser:
@@ -407,7 +407,7 @@ class ContactNoteAuthorFilter(admin.SimpleListFilter):
     self,
     request: HttpRequest,
     model_admin: admin.ModelAdmin[Model],
-  ) -> Optional[Iterable[tuple[str, str]]]:
+  ) -> Iterable[tuple[str, str]] | None:
     authors = get_user_model().objects.exclude(notes__isnull=True)
     return [(str(obj.id), str(obj)) for obj in authors]
 
@@ -464,7 +464,7 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
   def has_delete_permission(
     self,
     request: HttpRequest,
-    obj: Optional[Model] = None,
+    obj: Model | None = None,
   ) -> bool:
     """Allow superusers to delete Notes."""
     return request.user.is_superuser
@@ -507,7 +507,7 @@ class CampaignActivityInline(
   def get_readonly_fields(
     self,
     request: HttpRequest,
-    obj: Optional[CampaignActivity] = None,
+    obj: CampaignActivity | None = None,
   ) -> list[str]:
     readonly_fields = list(CampaignActivity.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':
@@ -550,7 +550,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
   def get_readonly_fields(
     self,
     request: HttpRequest,
-    obj: Optional[EmailCampaign] = None,
+    obj: EmailCampaign | None = None,
   ) -> list[str]:
     readonly_fields = list(EmailCampaign.API_READONLY_FIELDS)
     if obj and obj.current_status == 'DONE':

@@ -1,7 +1,7 @@
 from functools import partial
 from math import ceil
 import random
-from typing import Type, TypeVar, Optional, Iterable, cast
+from typing import Type, TypeVar, Iterable, cast
 from unittest.mock import patch, MagicMock
 from urllib.parse import urlencode
 
@@ -123,7 +123,7 @@ class TestImportCommand(TestCase):
   def get_api_url(
     self,
     model: Type[E],
-    api_id: Optional[str] = None,
+    api_id: str | None = None,
   ) -> str:
     url = model.remote.get_url(api_id=api_id)
     if params := model.API_GET_QUERIES:

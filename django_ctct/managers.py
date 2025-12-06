@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import (
   TYPE_CHECKING, TypeVar, ClassVar,
-  Iterable, Literal, Optional, NoReturn, Union, cast,
+  Iterable, Literal, NoReturn, Union, cast,
 )
 from urllib.parse import urlencode
 from uuid import UUID
@@ -71,9 +71,9 @@ class ConnectionManagerMixin(Manager[T]):
 
   def get_url(
     self,
-    api_id: Optional[str | UUID] = None,
-    endpoint: Optional[str] = None,
-    endpoint_suffix: Optional[str] = None,
+    api_id: str | UUID | None = None,
+    endpoint: str | None = None,
+    endpoint_suffix: str | None = None,
   ) -> str:
     endpoint = endpoint or self.model.API_ENDPOINT
     if not endpoint.startswith(self.model.API_VERSION):
@@ -271,7 +271,7 @@ class Serializer(Manager[S]):
   def deserialize_related_obj_fields(
     self,
     data: JsonDict,
-    parent_pk: Optional[int] = None
+    parent_pk: int | None = None
   ) -> JsonDict:
     """Deserialize ForeignKeys and OneToOneFields.
 
@@ -299,7 +299,7 @@ class Serializer(Manager[S]):
   def deserialize_related_objs_fields(
     self,
     data: JsonDict,
-    parent_pk: Optional[int] = None,
+    parent_pk: int | None = None,
   ) -> tuple[JsonDict, list[RelatedObjects]]:
     """Deserialize ManyToManyFields and ReverseForeignKeys."""
 
@@ -353,7 +353,7 @@ class Serializer(Manager[S]):
   def deserialize(
     self,
     data: JsonDict,
-    pk: Optional[int] = None,
+    pk: int | None = None,
   ) -> tuple[S, list[RelatedObjects]]:
     """Convert from API response body to Django object."""
 
@@ -467,7 +467,7 @@ class RemoteManager(
 
   def all(  # type: ignore[override]
     self,
-    endpoint: Optional[str] = None,
+    endpoint: str | None = None,
   ) -> list[tuple[E, list[RelatedObjects]]]:
     """Gets all existing objects from the remote server.
 
@@ -537,7 +537,7 @@ class RemoteManager(
   def delete(
     self,
     obj: E,
-    endpoint_suffix: Optional[str] = None,
+    endpoint_suffix: str | None = None,
   ) -> None:
     """Deletes existing Django object(s) on the remote server.
 
@@ -596,9 +596,9 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
   # @task(queue_name='ctct')
   def add_list_memberships(
     self,
-    contact_list: Optional[ContactList] = None,
-    contact_lists: Optional[QuerySet[ContactList]] = None,
-    contacts: Optional[QuerySet[Contact]] = None,
+    contact_list: ContactList | None = None,
+    contact_lists: QuerySet[ContactList] | None = None,
+    contacts: QuerySet[Contact] | None = None,
   ) -> None:
     """Adds multiple Contacts to (multiple) ContactLists."""
 
@@ -868,8 +868,8 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
   def send_preview(
     self,
     obj: 'CampaignActivity',
-    recipients: Optional[list[str]] = None,
-    message: Optional[str] = None,
+    recipients: list[str] | None = None,
+    message: str | None = None,
   ) -> None:
     """Sends a preview of the EmailCampaign."""
 

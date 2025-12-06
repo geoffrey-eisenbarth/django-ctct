@@ -1,4 +1,4 @@
-from typing import Type, TypeVar, Generic, Any, Optional, cast
+from typing import Type, TypeVar, Generic, Any, cast
 
 import factory
 import factory.fuzzy
@@ -152,7 +152,7 @@ class ContactWithRelatedObjsFactory(ContactFactory):
   def custom_fields(
     self,
     create: bool,
-    extracted: Optional[list[ContactCustomField]],
+    extracted: list[ContactCustomField] | None,
     **kwargs: Any,
   ) -> None:
     if not create or not extracted:
@@ -163,7 +163,7 @@ class ContactWithRelatedObjsFactory(ContactFactory):
   def list_memberships(
     self,
     create: bool,
-    extracted: Optional[list[ContactList]],
+    extracted: list[ContactList] | None,
     **kwargs: Any,
   ) -> None:
     if not create or not extracted:
@@ -191,7 +191,7 @@ class CampaignActivityFactory(CTCTModelFactory[CampaignActivity]):
   def contact_lists(
     self,
     create: bool,
-    extracted: Optional[list[ContactList]],
+    extracted: list[ContactList] | None,
     **kwargs: Any,
   ) -> None:
     if not create or not extracted:

@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import Type, TypeVar, Optional, Any, Collection, Literal, cast
+from typing import Type, TypeVar, Any, Collection, Literal, cast
 from uuid import UUID
 
 from tqdm import tqdm
@@ -70,9 +70,9 @@ class Command(BaseCommand):
     model: Type[M],
     objs: list[M],
     update_conflicts: bool = True,
-    unique_fields: Optional[Collection[str]] = ['api_id'],
-    update_fields: Optional[Collection[str]] = None,
-    silent: Optional[bool] = None,
+    unique_fields: Collection[str] | None = ['api_id'],
+    update_fields: Collection[str] | None = None,
+    silent: bool | None = None,
   ) -> list[Model]:
     """Perform upsert using `bulk_create()`."""
 
@@ -101,7 +101,7 @@ class Command(BaseCommand):
       ]
 
     # Remove possible duplicates (CTCT API can't be trusted)
-    id_field: Optional[str] = None
+    id_field: str | None = None
     if model is CampaignSummary:
       id_field = 'campaign_id'
     elif issubclass(model, CTCTModel):

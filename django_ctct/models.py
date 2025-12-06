@@ -2,7 +2,7 @@ import datetime as dt
 import re
 from typing import (
   Type, TypeAlias, ClassVar, TypeGuard,
-  Optional, Any, Literal,
+  Any, Literal,
 )
 from typing_extensions import Self
 
@@ -73,8 +73,8 @@ class EndpointMixin(Model):
   API_VERSION: str = '/v3'
   API_ENDPOINT: str
   API_GET_QUERIES: dict[str, str] = {}
-  API_ENDPOINT_BULK_DELETE: Optional[str] = None
-  API_ENDPOINT_BULK_LIMIT: Optional[int] = None
+  API_ENDPOINT_BULK_DELETE: str | None = None
+  API_ENDPOINT_BULK_LIMIT: int | None = None
 
   class Meta:
     abstract = True
@@ -210,8 +210,8 @@ class CTCTModel(SerialModel):
     cls,
     field_name: str,
     data: JsonDict,
-    default: Optional[str] = None,
-  ) -> Optional[str]:
+    default: str | None = None,
+  ) -> str | None:
     if default is None:
       field = cls._meta.get_field(field_name)
       assert hasattr(field, 'default')
@@ -617,7 +617,7 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     return s
 
   @classmethod
-  def clean_remote_opt_out_date(cls, data: JsonDict) -> Optional[dt.datetime]:  # noqa: E501
+  def clean_remote_opt_out_date(cls, data: JsonDict) -> dt.datetime | None:  # noqa: E501
     assert isinstance(data['email_address'], dict)
     if opt_out_date := data['email_address'].get('opt_out_date', None):
       assert isinstance(opt_out_date, str)
@@ -957,7 +957,7 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     return self.name
 
   @classmethod
-  def clean_remote_scheduled_datetime(cls, data: JsonDict) -> Optional[dt.datetime]:  # noqa: E501
+  def clean_remote_scheduled_datetime(cls, data: JsonDict) -> dt.datetime | None:  # noqa: E501
     if last_sent_date := data.get('last_sent_date', None):
       # Not sure why this ts_format is different
       assert isinstance(last_sent_date, str)
@@ -1120,7 +1120,7 @@ class CampaignActivity(CTCTEndpointModel):
   )
 
   @property
-  def physical_address_in_footer(self) -> Optional[dict[str, str]]:
+  def physical_address_in_footer(self) -> dict[str, str] | None:
     """Returns the company address for email footers.
 
     Notes
@@ -1160,19 +1160,19 @@ class CampaignActivity(CTCTEndpointModel):
     return data
 
   @classmethod
-  def clean_remote_from_name(cls, data: JsonDict) -> Optional[str]:
+  def clean_remote_from_name(cls, data: JsonDict) -> str | None:
     return cls.clean_remote_string_with_default('from_name', data)
 
   @classmethod
-  def clean_remote_from_email(cls, data: JsonDict) -> Optional[str]:
+  def clean_remote_from_email(cls, data: JsonDict) -> str | None:
     return cls.clean_remote_string_with_default('from_email', data)
 
   @classmethod
-  def clean_remote_reply_to_email(cls, data: JsonDict) -> Optional[str]:
+  def clean_remote_reply_to_email(cls, data: JsonDict) -> str | None:
     return cls.clean_remote_string_with_default('reply_to_email', data)
 
   @classmethod
-  def clean_remote_subject(cls, data: JsonDict) -> Optional[str]:
+  def clean_remote_subject(cls, data: JsonDict) -> str | None:
     """Pass a `default` here so it won't appear in admin forms."""
     default = cls.MISSING_SUBJECT
     return cls.clean_remote_string_with_default('subject', data, default)
