@@ -215,7 +215,7 @@ class CTCTModel(SerialModel):
     if default is None:
       field = cls._meta.get_field(field_name)
       assert hasattr(field, 'default')
-      if field.default is NOT_PROVIDED:
+      if field.default is NOT_PROVIDED:  # pragma: no cover
         message = _(
           f"Must provide a default value for {cls.__name__}.{field_name}."
         )
@@ -350,7 +350,7 @@ class ContactCustomField(SerialModel):
   def __str__(self) -> str:
     try:
       s = f'[{self.custom_field.label}] {self.value}'
-    except CustomField.DoesNotExist:
+    except CustomField.DoesNotExist:  # pragma: no cover
       s = super().__str__()
     return s
 
@@ -617,7 +617,7 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     return s
 
   @classmethod
-  def clean_remote_opt_out_date(cls, data: JsonDict) -> dt.datetime | None:  # noqa: E501
+  def clean_remote_opt_out_date(cls, data: JsonDict) -> dt.datetime | None:
     assert isinstance(data['email_address'], dict)
     if opt_out_date := data['email_address'].get('opt_out_date', None):
       assert isinstance(opt_out_date, str)
@@ -764,10 +764,7 @@ class ContactPhoneNumber(CreatedAtMixin, UpdatedAtMixin, CTCTModel):
     numbers = r'\d+'
     s = data.get('phone_number', '')
     assert isinstance(s, str)
-    if s := ''.join(re.findall(numbers, s)):
-      pass
-    else:
-      s = cls.MISSING_NUMBER
+    s = ''.join(re.findall(numbers, s)) or cls.MISSING_NUMBER
     return s
 
 

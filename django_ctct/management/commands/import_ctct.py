@@ -131,7 +131,7 @@ class Command(BaseCommand):
           setattr(o, 'pk', id_to_pk[str(o.api_id)])
 
     # Inform the user
-    if not silent:
+    if not silent:  # pragma: no cover
       message = self.style.SUCCESS(
         f'{verb} {len(objs):,} {model.__name__} instances.'
       )
@@ -305,6 +305,6 @@ class Command(BaseCommand):
 
       if self.noinput or (input(question).lower()[0] == 'y'):
         self.import_model(model)
-      else:
+      else:  # pragma: no cover
         message = _(f'Skipping {model.__name__}')
         self.stdout.write(self.style.NOTICE(message))
