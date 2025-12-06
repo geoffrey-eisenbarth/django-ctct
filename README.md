@@ -99,7 +99,7 @@ CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct 
 > ./manage.py migrate
 ```
 
-4) **Create Authenticatin Token:**
+4) **Create Authentication Token:**
 
 After the app has been installed and configured, you must generate your first auth token:
 
