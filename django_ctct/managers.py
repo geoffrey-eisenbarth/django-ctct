@@ -27,7 +27,7 @@ from django.utils.translation import gettext_lazy as _
 from django_ctct.utils import get_related_fields
 
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
   from django_ctct.models import (
     JsonDict, RelatedObjects,
     EndpointMixin, SerialModel, CTCTModel, CTCTEndpointModel,
