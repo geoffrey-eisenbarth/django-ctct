@@ -17,7 +17,7 @@ from django_ctct.models import (
   Contact, ContactCustomField,
   EmailCampaign, CampaignActivity,
 )
-from django_ctct.signals import remote_save, remote_delete
+from django_ctct.signals import remote_delete
 
 from tests.factories import get_factory, TokenFactory
 
