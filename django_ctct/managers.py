@@ -418,7 +418,7 @@ class RemoteManager(
 
     """
 
-    if not (pk := obj.pk):
+    if not obj.pk:
       raise ValueError('Must create object locally first.')
 
     self._pre_api_call()
@@ -430,7 +430,7 @@ class RemoteManager(
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    obj, _ = self.deserialize(data, pk=pk)
+    obj, _ = self.deserialize(data, pk=obj.pk)
 
     # Overwrite local obj with CTCT's response
     obj.save()
@@ -512,7 +512,7 @@ class RemoteManager(
 
     """
 
-    if not (pk := obj.pk):
+    if obj.pk is None:
       raise ValueError('Must create object locally first.')
     elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
@@ -526,7 +526,7 @@ class RemoteManager(
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    obj, _ = self.deserialize(data, pk=pk)
+    obj, _ = self.deserialize(data, pk=obj.pk)
 
     # Overwrite local obj with CTCT's response
     obj.save()
@@ -678,7 +678,7 @@ class ContactRemoteManager(RemoteManager['Contact']):
 
     """
 
-    if not obj.pk:
+    if obj.pk is None:
       raise ValueError('Must create object locally first.')
 
     # This endpoint expects a slightly different serialization
@@ -734,7 +734,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     from django_ctct.models import CampaignActivity
 
     # Validate
-    if not (pk := obj.pk):
+    if obj.pk is None:
       raise ValueError('Must create object locally first.')
     try:
       activity = obj.campaign_activities.get(role='primary_email')
@@ -760,7 +760,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     )
     data = self.raise_or_json(response)
 
-    obj, list_of_related_objs = self.deserialize(data, pk=pk)
+    obj, list_of_related_objs = self.deserialize(data, pk=obj.pk)
 
     # Set CTCT's assigned api_id on our local CampaignActivity instance
     for (model, related_objs) in list_of_related_objs:
@@ -798,7 +798,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     preview, the `primary_email` CampaignActivity must be updated remotely.
 
     """
-    if not (pk := obj.pk):
+    if obj.pk is None:
       raise ValueError('Must create object locally first.')
     elif obj.api_id is None:
       raise ValueError('Must create object remotely first.')
@@ -812,7 +812,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
 
     # NOTE: We don't need to do anything with `related_objs` since they were
     #       set locally before the API request.
-    obj, _ = self.deserialize(data, pk=pk)
+    obj, _ = self.deserialize(data, pk=obj.pk)
 
     # Overwrite local obj with CTCT's response
     obj.save()

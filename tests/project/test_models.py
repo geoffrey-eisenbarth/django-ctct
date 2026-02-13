@@ -100,17 +100,14 @@ class TestCRUD(RequestsMockMixin[E]):
   model: Type[E]
 
   def create_obj(self, obj: E) -> E:
-    """Create the object locally and remotely."""
     message = _("Must define `create_obj` on the inheriting class.")
     raise ImproperlyConfigured(message)
 
   def update_obj(self, obj: E) -> E:
-    """Create the object locally and remotely."""
     message = _("Must define `update_obj` on the inheriting class.")
     raise ImproperlyConfigured(message)
 
   def delete_obj(self, obj: E) -> None:
-    """Create the object locally and remotely."""
     message = _("Must define `delete_obj` on the inheriting class.")
     raise ImproperlyConfigured(message)
 
@@ -254,19 +251,141 @@ class ModelTest(TestCRUD[E], TestCase):
 
   def create_obj(self, obj: E) -> E:
     """Create the object locally and remotely."""
+
+    # PK is required
+    with self.assertRaises(ValueError):
+      self.model.remote.create(obj)
+
     obj.save()
-    remote_save(self.model, obj)
-    obj.refresh_from_db()
+    obj = self.model.remote.create(obj)
     return obj
 
   def update_obj(self, obj: E) -> E:
     """Update the object locally and remotely."""
+
+    pk, api_id = obj.pk, obj.api_id
+
+    # PK is required
+    obj.pk, obj.api_id = None, api_id
+    with self.assertRaises(ValueError):
+      self.model.remote.update(obj)
+
+    # API ID is required
+    obj.pk, obj.api_id = pk, None
+    with self.assertRaises(ValueError):
+      self.model.remote.update(obj)
+
+    obj.pk, obj.api_id = pk, api_id
     obj.save()
-    remote_save(self.model, obj)
-    obj.refresh_from_db()
+    obj = self.model.remote.update(obj)
     return obj
 
   def delete_obj(self, obj: E) -> None:
     """Delete the object locally and remotely."""
     obj.delete()
     remote_delete(self.model, obj)
+
+
+@patch('django_ctct.models.Token.decode')
+class CampaignActivityTests(
+  RequestsMockMixin[CampaignActivity],
+  TestCase,
+):
+
+  model = CampaignActivity
+
+  def test_send_preview(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+
+    # Set up API mocker
+    api_response = self.get_api_response(self.existing_obj)
+    self.mock_api.post(
+      url=self.model.remote.get_url(
+        api_id=self.existing_obj.api_id,
+        endpoint_suffix='/tests',
+      ),
+      status_code=200,
+      json=api_response,
+    )
+
+    # Send the preview
+    CampaignActivity.remote.send_preview(
+      self.existing_obj,
+      recipients=[
+        'preview1@example.com',
+        'preview2@example.com',
+      ],
+      message='This is a preview message.'
+    )
+
+    # Verify API was called
+    assert self.mock_api.call_count == 1
+
+  def test_schedule(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+    campaign = self.existing_obj.campaign
+
+    self.existing_obj.contact_lists.add(*self.contact_lists)
+    campaign.scheduled_datetime = timezone.now()
+    campaign.save()
+
+    # Set up API mocker
+    api_response = self.get_api_response(self.existing_obj)
+    self.mock_api.post(
+      url=self.model.remote.get_url(
+        api_id=self.existing_obj.api_id,
+        endpoint_suffix='/schedules',
+      ),
+      status_code=201,
+      json=api_response,
+    )
+
+    # Schedule the CampaignActivity
+    CampaignActivity.remote.schedule(self.existing_obj)
+
+    # Verify API was called
+    assert self.mock_api.call_count == 1
+
+    # Non-primary role should raise
+    self.existing_obj.role = 'permalink'
+    self.existing_obj.save()
+    with self.assertRaises(ValueError):
+      CampaignActivity.remote.schedule(self.existing_obj)
+
+    # Require scheduled_datetime
+    self.existing_obj.role = 'primary_email'
+    campaign.scheduled_datetime = None
+    campaign.save()
+    with self.assertRaises(ValueError):
+      CampaignActivity.remote.schedule(self.existing_obj)
+
+    # Require contact_lists
+    campaign.scheduled_datetime = timezone.now()
+    campaign.save()
+    self.existing_obj.contact_lists.clear()
+    with self.assertRaises(ValueError):
+      CampaignActivity.remote.schedule(self.existing_obj)
+
+  def test_unschedule(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+
+    # Set up API mocker
+    self.mock_api.delete(
+      url=self.model.remote.get_url(
+        api_id=self.existing_obj.api_id,
+        endpoint_suffix='/schedules',
+      ),
+      status_code=204,
+    )
+
+    # Unschedule the CampaignActivity
+    CampaignActivity.remote.unschedule(self.existing_obj)
+
+    # Verify API was called
+    assert self.mock_api.call_count == 1
+
+    # Non-primary role should raise
+    self.existing_obj.role = 'resend'
+    self.existing_obj.save()
+    with self.assertRaises(ValueError):
+      CampaignActivity.remote.unschedule(self.existing_obj)
