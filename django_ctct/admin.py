@@ -410,8 +410,8 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
   def save_model(
     self,
     request: HttpRequest,
-    obj: Model,
-    form: forms.ModelForm,
+    obj: Contact,
+    form: forms.ModelForm[Contact],
     change: bool,
   ) -> None:
     """CTCT requires source to be set for compliance reasons."""

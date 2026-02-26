@@ -17,12 +17,12 @@ REQUIRED_SETTINGS = {
 
 class TestConfigReady(TestCase):
 
-  def test_ready_with_all_required_settings(self):
+  def test_ready_with_all_required_settings(self) -> None:
     with override_settings(**REQUIRED_SETTINGS):
       config = CTCTConfig('django_ctct', sys.modules[__name__])
       config.ready()
 
-  def test_ready_with_missing_required_setting(self):
+  def test_ready_with_missing_required_setting(self) -> None:
     for missing_setting in REQUIRED_SETTINGS:
       with self.subTest(missing_setting=missing_setting):
         with override_settings(**REQUIRED_SETTINGS):
