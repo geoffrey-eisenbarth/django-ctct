@@ -164,11 +164,16 @@ CTCT_PHYSICAL_ADDRESS = {
 # Also force into sys.modules so it's visible to Django's autoreload.
 
 f = Path(BASE_DIR, 'project', 'local_settings.py')
-if f.exists():
-  import sys
-  import imp
-  module_name = 'project.local_settings'
-  module = imp.new_module(module_name)
-  module.__file__ = str(f)
-  sys.modules[module_name] = module
-  exec(open(f, 'rb').read())
+#if f.exists():
+#  import sys
+#  import importlib.util
+#
+#  module_name = 'project.local_settings'
+#  spec = importlib.util.spec_from_file_location(module_name, f)
+#  module = importlib.util.module_from_spec(spec)
+#
+#  module.__file__ = str(f)
+#  sys.modules[module_name] = module
+#
+#  with open(f, 'rb') as config_file:
+#      exec(config_file.read(), globals())

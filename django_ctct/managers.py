@@ -106,10 +106,9 @@ class ConnectionManagerMixin(Manager[T]):
         data = data[0]
       # Models use 'error_message', Tokens use 'error_description'
       error_message = data.get('error_message', data.get('error_description'))
-      message = _(
+      raise HTTPError(_(
         f"[{response.status_code}] {error_message}"
-      )
-      raise HTTPError(message, response=response)
+      ), response=response)
 
     return data
 
@@ -163,11 +162,10 @@ class TokenRemoteManager(ConnectionManagerMixin['Token'], Manager['Token']):
 
     token = self.model.objects.first()
     if not token:
-      message = _(
+      raise ValueError(_(
         "No tokens in the database yet. "
         f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
-      )
-      raise ValueError(message)
+      ))
 
     try:
       token.decode()
@@ -564,17 +562,13 @@ class RemoteManager(
     """Deletes multiple objects from remote server in batches."""
 
     if self.model.API_ENDPOINT_BULK_DELETE is None:
-      name = self.model.__name__
-      message = _(
-        f"ConstantContact does not support bulk deletion of {name}."
-      )
-      raise NotImplementedError(message)
+      raise NotImplementedError(_(
+        f"{self.model.__name__} does not have a bulk delete API endpoint."
+      ))
     elif self.model.API_ENDPOINT_BULK_LIMIT is None:
-      name = self.model.__name__
-      message = _(
-        f"No API limit specified for {name}."
-      )
-      raise ImproperlyConfigured(message)
+      raise ImproperlyConfigured(_(
+        f"No API limit specified for {self.model.__name__}."
+      ))
 
     # Prepare connection and payloads
     self.connect()
@@ -609,26 +603,25 @@ class ContactListRemoteManager(RemoteManager['ContactList']):
     if is_ctct(Contact) and hasattr(Contact, 'API_ENDPOINT_BULK_LIMIT'):
       step_size = Contact.API_ENDPOINT_BULK_LIMIT
     else:
-      message = _("Contact must specify 'API_ENDPOINT_BULK_LIMIT'.")
-      raise ImproperlyConfigured(message)
+      raise ImproperlyConfigured(_(
+        "Contact must specify 'API_ENDPOINT_BULK_LIMIT'."
+      ))
 
     if contact_list is not None:
       list_ids = [str(contact_list.api_id)]
     elif contact_lists is not None:
       list_ids = list(map(str, contact_lists.values_list('api_id', flat=True)))
     else:
-      message = _(
+      raise ValueError(_(
         "Must pass either `contact_list` or `contact_lists`."
-      )
-      raise ValueError(message)
+      ))
 
     if contacts is not None:
       contact_ids = list(map(str, contacts.values_list('api_id', flat=True)))
     else:
-      message = _(
+      raise ValueError(_(
         "Must pass a QuerySet of Contacts."
-      )
-      raise ValueError(message)
+      ))
 
     for i in range(0, len(contact_ids), step_size):
       self._pre_api_call()
@@ -766,7 +759,7 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
     # Set CTCT's assigned api_id on our local CampaignActivity instance
     for (model, related_objs) in list_of_related_objs:
       if (model is CampaignActivity):
-        # NOTE: All lists are invariant, so they won't remember that
+        # NOTE: All lists are invariant, so mypy doesn't know that
         #       `related_objs` is a list[CampaignActivity].
         for related_obj in cast(list[CampaignActivity], related_objs):
           if related_obj.role == 'primary_email':
@@ -783,7 +776,6 @@ class EmailCampaignRemoteManager(RemoteManager['EmailCampaign']):
 
     # Send preview and/or schedule the campaign
     if obj.send_preview or (obj.scheduled_datetime is not None):
-      CampaignActivity.remote.connect()
       CampaignActivity.remote.update(activity)
 
     return obj
@@ -826,11 +818,10 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
 
   # @task(queue_name='ctct')
   def create(self, obj: 'CampaignActivity') -> NoReturn:  # type: ignore[override]  # noqa: E501
-    message = _(
+    raise NotImplementedError(_(
       "ConstantContact API does not support creating CampaignActivities. "
       "They are created during the creation of an EmailCampaign."
-    )
-    raise NotImplementedError(message)
+    ))
 
   # @task(queue_name='ctct')
   def update(self, obj: 'CampaignActivity') -> 'CampaignActivity':  # type: ignore[override]  # noqa: E501
@@ -847,10 +838,9 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
     """
 
     if obj.role != 'primary_email':
-      message = _(
+      raise NotImplementedError(_(
         f"CampaignActivity with role `{obj.role}` not supported yet."
-      )
-      raise NotImplementedError(message)
+      ))
 
     if was_scheduled := (obj.campaign.current_status == 'SCHEDULED'):
       self.unschedule(obj)
@@ -906,29 +896,25 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
 
     Notes
     -----
-    Recipients must be set before scheduling; if recipients have already been
-    set, this can be skipped by setting `update_first=False`.
+    Recipients must be set before scheduling.
 
     """
 
     # Validate role, scheduled_datetime, and contact_lists
     if obj.role != 'primary_email':
-      message = _(
+      raise ValueError(_(
         f"Cannot schedule CampaignActivities with role '{obj.role}'."
-      )
-      raise ValueError(message)
+      ))
 
     if obj.campaign.scheduled_datetime is None:
-      message = _(
+      raise ValueError(_(
         "Must specify `scheduled_datetime`."
-      )
-      raise ValueError(message)
+      ))
 
     if not obj.contact_lists.exists():
-      message = _(
+      raise ValueError(_(
         "Must specify `contact_lists`."
-      )
-      raise ValueError(message)
+      ))
 
     # Schedule the CampaignActivity
     self._pre_api_call()
@@ -944,10 +930,9 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
     if obj.role == 'primary_email':
       self.delete(obj, endpoint_suffix='/schedules')
     else:
-      message = _(
+      raise ValueError(_(
         f"Cannot unschedule CampaignActivities with role '{obj.role}'."
-      )
-      raise ValueError(message)
+      ))
 
 
 class CampaignSummaryRemoteManager(RemoteManager['CampaignSummary']):
