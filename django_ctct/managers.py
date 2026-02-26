@@ -22,6 +22,7 @@ from django.db.models.query import QuerySet
 from django.http import HttpRequest, Http404
 from django.middleware.csrf import get_token as get_csrf_token
 from django.urls import reverse
+from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.utils import get_related_fields
@@ -874,11 +875,20 @@ class CampaignActivityRemoteManager(RemoteManager['CampaignActivity']):
     """Sends a preview of the EmailCampaign."""
 
     if recipients is None:
-      default = getattr(settings, 'CTCT_PREVIEW_RECIPIENTS', settings.MANAGERS)
-      recipients = [email for (name, email) in default]
+      if getter := getattr(settings, 'CTCT_PREVIEW_RECIPIENTS_CALLABLE', None):
+        recipients = import_string(getter)(obj.campaign)
+      else:
+        recipients = [
+          email
+          for (name, email)
+          in getattr(settings, 'CTCT_PREVIEW_RECIPIENTS', settings.MANAGERS)
+        ]
 
     if message is None:
-      message = getattr(settings, 'CTCT_PREVIEW_MESSAGE', '')
+      if getter := getattr(settings, 'CTCT_PREVIEW_MESSAGE_CALLABLE', None):
+        message = import_string(getter)(obj.campaign)
+      else:
+        message = getattr(settings, 'CTCT_PREVIEW_MESSAGE', '')
 
     self._pre_api_call()
     response = self.session.post(

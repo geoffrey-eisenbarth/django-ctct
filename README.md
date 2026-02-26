@@ -60,7 +60,7 @@ CTCT_REDIRECT_URI = "REDIRECT_URI_FROM_CTCT"
 CTCT_FROM_NAME = "YOUR_EMAIL_NAME"
 CTCT_FROM_EMAIL = "YOUR_EMAIL_ADDRESS"
 
-# Optional settings
+# Optional settings, callables will receive the EmailCampaign object as an argument
 CTCT_REPLY_TO_EMAIL = "YOUR_REPLY_TO_ADDRESS"
 CTCT_PHYSICAL_ADDRESS = {
   'address_line1': '1060 W Addison St',
@@ -77,7 +77,9 @@ CTCT_PREVIEW_RECIPIENTS = (
   ('First Recipient', 'first@recipient.com'),
   ('Second Recipient', 'second@recipient.com'),
 )
+CTCT_PREVIEW_RECIPIENTS_CALLABLE = "myproject.myapp.ctct.get_preview_recipients"
 CTCT_PREVIEW_MESSAGE = "This is an EmailCampaign preview."
+CTCT_PREVIEW_MESSAGE_CALLABLE = "myproject.myapp.ctct.get_preview_message"
 
 # Optional functionality settings and their default settings
 CTCT_USE_ADMIN = False       # Add django-ctct models to admin
