@@ -292,6 +292,39 @@ class ContactCustomFieldInline(
   extra = 0
 
 
+class ContactStatusFilter(admin.SimpleListFilter):
+  """Simple filter for CTCT Status."""
+
+  STATUSES = (
+    ('sync', _('Synced')),
+    ('not_synced', _('Not Synced')),
+    ('optout', _('Opted Out')),
+  )
+
+  title = 'Status'
+  parameter_name = 'ctct'
+
+  def lookups(
+    self,
+    request: HttpRequest,
+    model_admin: admin.ModelAdmin[Contact],
+  ) -> Iterable[tuple[str, str]] | None:
+    return self.STATUSES
+
+  def queryset(
+    self,
+    request: HttpRequest,
+    queryset: QuerySet[Contact],
+  ) -> QuerySet[Contact]:
+    if self.value() == 'sync':
+      queryset = queryset.filter(api_id__isnull=False)
+    elif self.value() == 'not_synced':
+      queryset = queryset.filter(api_id__isnull=True)
+    elif self.value() == 'optout':
+      queryset = queryset.filter(opt_out_date__isnull=False)
+    return queryset
+
+
 class ContactAdmin(RemoteModelAdmin[Contact]):
   """Admin functionality for CTCT Contacts."""
 
@@ -302,6 +335,8 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     'last_name',
     'job_title',
     'company_name',
+    'street_addresses__city',
+    'street_addresses__state',
   )
 
   list_display = (
@@ -315,6 +350,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     'is_synced',
   )
   list_filter = (
+    ContactStatusFilter,
     'list_memberships',
   )
   empty_value_display = '(None)'
@@ -351,7 +387,9 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
       ),
     }),
   )
-  filter_horizontal = ('list_memberships', )
+  filter_horizontal = (
+    'list_memberships',
+  )
   inlines = (
     ContactCustomFieldInline,
     ContactPhoneNumberInline,
