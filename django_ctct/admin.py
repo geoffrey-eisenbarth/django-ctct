@@ -369,6 +369,18 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
       readonly_fields.append('list_memberships')
     return readonly_fields
 
+  def save_model(
+    self,
+    request: HttpRequest,
+    obj: Model,
+    form: forms.ModelForm,
+    change: bool,
+  ) -> None:
+    """CTCT requires source to be set for compliance reasons."""
+    source_field = 'update_source' if obj.pk else 'create_source'
+    setattr(obj, source_field, 'Account')
+    super().save_model(request, obj, form, change)
+
   def save_formset(
     self,
     request: HttpRequest,
