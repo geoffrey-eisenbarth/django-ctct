@@ -1,36 +1,41 @@
 import functools
-from typing import TypeVar, ParamSpec, Generic, Callable, Iterable
-from requests.exceptions import HTTPError
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 
 from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
-from django.db.models import Model, QuerySet, When, Case, F, FloatField
+from django.db.models import Case, F, FloatField, Model, QuerySet, When
 from django.db.models.functions import Cast
-from django.forms import ModelForm, BaseFormSet
+from django.forms import BaseFormSet, ModelForm
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpRequest
 from django.urls import reverse
-from django.utils.html import format_html
 from django.utils.formats import date_format
+from django.utils.html import format_html
 from django.utils.translation import gettext as _
+from requests.exceptions import HTTPError
 
 from django_ctct.models import (
-  CTCTEndpointModel, ContactList, CustomField,
+  CampaignActivity,
+  CampaignSummary,
   Contact,
-  ContactCustomField, ContactStreetAddress, ContactPhoneNumber, ContactNote,
-  EmailCampaign, CampaignActivity, CampaignSummary,
+  ContactCustomField,
+  ContactList,
+  ContactNote,
+  ContactPhoneNumber,
+  ContactStreetAddress,
+  CTCTEndpointModel,
+  CustomField,
+  EmailCampaign,
 )
-from django_ctct.signals import remote_save, remote_delete
+from django_ctct.signals import remote_delete, remote_save
+
+M = TypeVar("M", bound=Model)
 
 
-P = ParamSpec('P')
-M = TypeVar('M', bound=Model)
-E = TypeVar('E', bound=CTCTEndpointModel)
-
-
-def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
+def catch_api_errors[**P](func: Callable[P, None]) -> Callable[P, None]:
   """Decorator to catch HTTP errors from CTCT API.
 
   Notes
@@ -46,7 +51,7 @@ def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
     try:
       return func(*args, **kwargs)
     except HTTPError as e:
-      if getattr(settings, 'CTCT_RAISE_FOR_API', False):
+      if getattr(settings, "CTCT_RAISE_FOR_API", False):
         raise e
       else:
         self, request, *x = args
@@ -64,11 +69,11 @@ def catch_api_errors(func: Callable[P, None]) -> Callable[P, None]:
 class RemoteSyncMixin:
   @admin.display(
     boolean=True,
-    description=_('Synced'),
-    ordering='api_id',
+    description=_("Synced"),
+    ordering="api_id",
   )
   def is_synced(self, obj: CTCTEndpointModel) -> bool:
-    return (obj.api_id is not None)
+    return obj.api_id is not None
 
 
 class ViewModelAdmin(admin.ModelAdmin[Model]):
@@ -100,9 +105,7 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
     """Prevent updates in the Django admin."""
     if obj is not None:
       readonly_fields = tuple(
-        field.name
-        for field in obj._meta.fields
-        if field.name != 'active'
+        field.name for field in obj._meta.fields if field.name != "active"
       )
     else:
       readonly_fields = tuple()
@@ -117,12 +120,10 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
     return request.user.is_superuser
 
 
-class RemoteModelAdmin(
-  RemoteSyncMixin, admin.ModelAdmin[E], Generic[E]
-):
+class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E]):
   """Facilitate remote saving and deleting."""
 
-  sync_admin: bool = getattr(settings, 'CTCT_SYNC_ADMIN', False)
+  sync_admin: bool = getattr(settings, "CTCT_SYNC_ADMIN", False)
 
   # ChangeView
   @catch_api_errors
@@ -186,9 +187,9 @@ class ContactListForm(forms.ModelForm[ContactList]):
   class Meta:
     model = ContactList
     widgets = {
-      'description': forms.Textarea,
+      "description": forms.Textarea,
     }
-    fields = '__all__'
+    fields = "__all__"
 
 
 class ContactListAdmin(RemoteModelAdmin[ContactList]):
@@ -196,32 +197,35 @@ class ContactListAdmin(RemoteModelAdmin[ContactList]):
 
   # ListView
   list_display = (
-    'name',
-    'membership',
-    'optouts',
-    'created_at',
-    'updated_at',
-    'favorite',
-    'is_synced',
+    "name",
+    "membership",
+    "optouts",
+    "created_at",
+    "updated_at",
+    "favorite",
+    "is_synced",
   )
 
-  @admin.display(description=_('Membership'))
+  @admin.display(description=_("Membership"))
   def membership(self, obj: ContactList) -> int:
     return obj.members.all().count()
 
-  @admin.display(description=_('Opt Outs'))
+  @admin.display(description=_("Opt Outs"))
   def optouts(self, obj: ContactList) -> int:
-    return obj.members.exclude(opt_out_source='').count()
+    return obj.members.exclude(opt_out_source="").count()
 
   # ChangeView
   form = ContactListForm
   fieldsets = (
-    (None, {
-      'fields': (
-        ('name', 'favorite'),
-        'description',
-      ),
-    }),
+    (
+      None,
+      {
+        "fields": (
+          ("name", "favorite"),
+          "description",
+        ),
+      },
+    ),
   )
 
 
@@ -230,64 +234,57 @@ class CustomFieldAdmin(RemoteModelAdmin[CustomField]):
 
   # ListView
   list_display = (
-    'label',
-    'type',
-    'created_at',
-    'updated_at',
-    'is_synced',
+    "label",
+    "type",
+    "created_at",
+    "updated_at",
+    "is_synced",
   )
 
   # ChangeView
-  exclude = ('api_id', )
+  exclude = ("api_id",)
 
 
-class ContactStreetAddressInline(
-  admin.StackedInline[ContactStreetAddress, Contact]
-):
+class ContactStreetAddressInline(admin.StackedInline[ContactStreetAddress, Contact]):
   """Inline for adding ContactStreetAddresses to a Contact."""
 
   model = ContactStreetAddress
-  exclude = ('api_id', )
+  exclude = ("api_id",)
 
   extra = 0
-  max_num = Contact.API_MAX_NUM['street_addresses']
+  max_num = Contact.API_MAX_NUM["street_addresses"]
 
 
-class ContactPhoneNumberInline(
-  admin.TabularInline[ContactPhoneNumber, Contact]
-):
+class ContactPhoneNumberInline(admin.TabularInline[ContactPhoneNumber, Contact]):
   """Inline for adding ContactPhoneNumbers to a Contact."""
 
   model = ContactPhoneNumber
-  exclude = ('api_id', )
+  exclude = ("api_id",)
 
   extra = 0
-  max_num = Contact.API_MAX_NUM['phone_numbers']
+  max_num = Contact.API_MAX_NUM["phone_numbers"]
 
 
 class ContactNoteInline(admin.TabularInline[ContactNote, Contact]):
   """Inline for adding ContactNotes to a Contact."""
 
   model = ContactNote
-  fields = ('content', )
+  fields = ("content",)
 
   extra = 0
-  max_num = Contact.API_MAX_NUM['notes']
+  max_num = Contact.API_MAX_NUM["notes"]
 
   def has_change_permission(
     self,
     request: HttpRequest,
-    obj: Contact | None = None,  # type: ignore[override]
+    obj: Contact | None = None,
   ) -> bool:
     return False
 
 
-class ContactCustomFieldInline(
-  admin.TabularInline[ContactCustomField, Contact]
-):
-
+class ContactCustomFieldInline(admin.TabularInline[ContactCustomField, Contact]):
   model = ContactCustomField
-  exclude = ('api_id', )
+  exclude = ("api_id",)
 
   extra = 0
 
@@ -296,13 +293,13 @@ class ContactStatusFilter(admin.SimpleListFilter):
   """Simple filter for CTCT Status."""
 
   STATUSES = (
-    ('sync', _('Synced')),
-    ('not_synced', _('Not Synced')),
-    ('optout', _('Opted Out')),
+    ("sync", _("Synced")),
+    ("not_synced", _("Not Synced")),
+    ("optout", _("Opted Out")),
   )
 
-  title = 'Status'
-  parameter_name = 'ctct'
+  title = "Status"
+  parameter_name = "ctct"
 
   def lookups(
     self,
@@ -316,11 +313,11 @@ class ContactStatusFilter(admin.SimpleListFilter):
     request: HttpRequest,
     queryset: QuerySet[Contact],
   ) -> QuerySet[Contact]:
-    if self.value() == 'sync':
+    if self.value() == "sync":
       queryset = queryset.filter(api_id__isnull=False)
-    elif self.value() == 'not_synced':
+    elif self.value() == "not_synced":
       queryset = queryset.filter(api_id__isnull=True)
-    elif self.value() == 'optout':
+    elif self.value() == "optout":
       queryset = queryset.filter(opt_out_date__isnull=False)
     return queryset
 
@@ -330,66 +327,73 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
 
   # ListView
   search_fields = (
-    'email',
-    'first_name',
-    'last_name',
-    'job_title',
-    'company_name',
-    'street_addresses__city',
-    'street_addresses__state',
+    "email",
+    "first_name",
+    "last_name",
+    "job_title",
+    "company_name",
+    "street_addresses__city",
+    "street_addresses__state",
   )
 
   list_display = (
-    'email',
-    'first_name',
-    'last_name',
-    'job_title',
-    'company_name',
-    'updated_at',
-    'opted_out',
-    'is_synced',
+    "email",
+    "first_name",
+    "last_name",
+    "job_title",
+    "company_name",
+    "updated_at",
+    "opted_out",
+    "is_synced",
   )
   list_filter = (
     ContactStatusFilter,
-    'list_memberships',
+    "list_memberships",
   )
-  empty_value_display = '(None)'
+  empty_value_display = "(None)"
 
   @admin.display(
     boolean=True,
-    description=_('Opted Out'),
-    ordering='opt_out_date',
+    description=_("Opted Out"),
+    ordering="opt_out_date",
   )
   def opted_out(self, obj: Contact) -> bool:
     return bool(obj.opt_out_source)
 
   # ChangeView
   fieldsets = (
-    (None, {
-      'fields': (
-        'email',
-        'first_name',
-        'last_name',
-        'job_title',
-        'company_name',
-      ),
-    }),
-    ('CONTACT LISTS', {
-      'fields': (
-        'list_memberships',
-        ('opt_out_source', 'opt_out_date', 'opt_out_reason'),
-      ),
-    }),
-    ('TIMESTAMPS', {
-      'fields': (
-        'created_at',
-        'updated_at',
-      ),
-    }),
+    (
+      None,
+      {
+        "fields": (
+          "email",
+          "first_name",
+          "last_name",
+          "job_title",
+          "company_name",
+        ),
+      },
+    ),
+    (
+      "CONTACT LISTS",
+      {
+        "fields": (
+          "list_memberships",
+          ("opt_out_source", "opt_out_date", "opt_out_reason"),
+        ),
+      },
+    ),
+    (
+      "TIMESTAMPS",
+      {
+        "fields": (
+          "created_at",
+          "updated_at",
+        ),
+      },
+    ),
   )
-  filter_horizontal = (
-    'list_memberships',
-  )
+  filter_horizontal = ("list_memberships",)
   inlines = (
     ContactCustomFieldInline,
     ContactPhoneNumberInline,
@@ -404,7 +408,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
   ) -> list[str]:
     readonly_fields = list(Contact.API_READONLY_FIELDS)
     if obj and obj.opt_out_source and not request.user.is_superuser:
-      readonly_fields.append('list_memberships')
+      readonly_fields.append("list_memberships")
     return readonly_fields
 
   def save_model(
@@ -415,8 +419,8 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     change: bool,
   ) -> None:
     """CTCT requires source to be set for compliance reasons."""
-    source_field = 'update_source' if obj.pk else 'create_source'
-    setattr(obj, source_field, 'Account')
+    source_field = "update_source" if obj.pk else "create_source"
+    setattr(obj, source_field, "Account")
     super().save_model(request, obj, form, change)
 
   def save_formset(
@@ -450,8 +454,8 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
 class ContactNoteAuthorFilter(admin.SimpleListFilter):
   """Only display Users that have authored a ContactNote."""
 
-  title = _('Author')
-  parameter_name = 'author'
+  title = _("Author")
+  parameter_name = "author"
 
   def lookups(
     self,
@@ -477,35 +481,35 @@ class ContactNoteAdmin(RemoteSyncMixin, ViewModelAdmin):
 
   # ListView
   search_fields = (
-    'content',
-    'contact__email',
-    'contact__first_name',
-    'contact__last_name',
-    'author__email',
-    'author__first_name',
-    'author__last_name',
+    "content",
+    "contact__email",
+    "contact__first_name",
+    "contact__last_name",
+    "author__email",
+    "author__first_name",
+    "author__last_name",
   )
 
   list_display_links = None
   list_display = (
-    'contact_link',
-    'content',
-    'author',
-    'created_at',
-    'is_synced',
+    "contact_link",
+    "content",
+    "author",
+    "created_at",
+    "is_synced",
   )
   list_filter = (
-    'created_at',
+    "created_at",
     ContactNoteAuthorFilter,
   )
 
   @admin.display(
-    description=_('Contact'),
-    ordering='contact__email',
+    description=_("Contact"),
+    ordering="contact__email",
   )
   def contact_link(self, obj: ContactNote) -> str:
     url = reverse(
-      'admin:django_ctct_contact_change',
+      "admin:django_ctct_contact_change",
       args=[obj.contact.pk],
     )
     html = format_html('<a href="{}">{}</a>', url, obj.contact)
@@ -525,31 +529,32 @@ class CampaignActivityInlineForm(forms.ModelForm[CampaignActivity]):
 
   html_content = forms.CharField(
     widget=forms.Textarea,
-    label=_('HTML Content'),
+    label=_("HTML Content"),
   )
 
   class Meta:
     model = CampaignActivity
-    fields = '__all__'
+    fields = "__all__"
 
 
-class CampaignActivityInline(
-  admin.StackedInline[CampaignActivity, EmailCampaign]
-):
+class CampaignActivityInline(admin.StackedInline[CampaignActivity, EmailCampaign]):
   """Inline for adding CampaignActivity to a EmailCampaign."""
 
   model = CampaignActivity
   form = CampaignActivityInlineForm
   fields = (
-    'role', 'current_status',
-    'from_name', 'from_email', 'reply_to_email',
-    'subject', 'preheader', 'html_content',
-    'contact_lists',
+    "role",
+    "current_status",
+    "from_name",
+    "from_email",
+    "reply_to_email",
+    "subject",
+    "preheader",
+    "html_content",
+    "contact_lists",
   )
 
-  filter_horizontal = (
-    'contact_lists',
-  )
+  filter_horizontal = ("contact_lists",)
 
   extra = 1
   max_num = 1
@@ -557,10 +562,10 @@ class CampaignActivityInline(
   def get_readonly_fields(
     self,
     request: HttpRequest,
-    obj: CampaignActivity | None = None,
+    obj: EmailCampaign | None = None,
   ) -> list[str]:
     readonly_fields = list(CampaignActivity.API_READONLY_FIELDS)
-    if obj and obj.current_status == 'DONE':
+    if obj and obj.current_status == "DONE":
       readonly_fields += list(CampaignActivity.API_EDITABLE_FIELDS)
     return readonly_fields
 
@@ -577,25 +582,26 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
 
   # ListView
   actions = None
-  search_fields = ('name', )
+  search_fields = ("name",)
   list_display = (
-    'name',
-    'current_status',
-    'scheduled_datetime',
-    'created_at',
-    'updated_at',
-    'is_synced',
+    "name",
+    "current_status",
+    "scheduled_datetime",
+    "created_at",
+    "updated_at",
+    "is_synced",
   )
 
   # ChangeView
   fieldsets = (
-    (None, {
-      'fields': (
-        'name', 'current_status', 'scheduled_datetime', 'send_preview'
-      ),
-    }),
+    (
+      None,
+      {
+        "fields": ("name", "current_status", "scheduled_datetime", "send_preview"),
+      },
+    ),
   )
-  inlines = (CampaignActivityInline, )
+  inlines = (CampaignActivityInline,)
 
   def get_readonly_fields(
     self,
@@ -603,8 +609,8 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     obj: EmailCampaign | None = None,
   ) -> list[str]:
     readonly_fields = list(EmailCampaign.API_READONLY_FIELDS)
-    if obj and obj.current_status == 'DONE':
-      readonly_fields.append('scheduled_datetime')
+    if obj and obj.current_status == "DONE":
+      readonly_fields.append("scheduled_datetime")
     return readonly_fields
 
   @catch_api_errors
@@ -616,14 +622,13 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     change: bool,
   ) -> None:
     if self.sync_admin:
-
       campaign = form.instance
       activity = formsets[0][0].instance
 
       # Handle remote saving the EmailCampaign
       # NOTE: The only EmailCampaign field that can be updated is 'name'
       campaign_created = not change
-      campaign_updated = change and ('name' in form.changed_data)
+      campaign_updated = change and ("name" in form.changed_data)
       if campaign_created or campaign_updated:
         remote_save(
           sender=self.model,
@@ -633,9 +638,9 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
 
       # Handle remote saving the primary_email CampaignActivity
       inline_changed = formsets[0][0].changed_data and not campaign_created
-      schedule_changed = ('scheduled_datetime' in form.changed_data)
-      preview_sent = ('send_preview' in form.changed_data) and campaign.send_preview  # noqa: E501
-      recipients_changed = ('contact_lists' in formsets[0][0].changed_data)
+      schedule_changed = "scheduled_datetime" in form.changed_data
+      preview_sent = ("send_preview" in form.changed_data) and campaign.send_preview  # noqa: E501
+      recipients_changed = "contact_lists" in formsets[0][0].changed_data
 
       if (
         inline_changed or schedule_changed or preview_sent or recipients_changed  # noqa: E501
@@ -661,7 +666,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     if campaign.scheduled_datetime is not None:
       date = date_format(campaign.scheduled_datetime, settings.DATETIME_FORMAT)
       action = f"scheduled to be sent {date}"
-    elif change and ('scheduled_datetime' in form.changed_data):
+    elif change and ("scheduled_datetime" in form.changed_data):
       action = "unscheduled remotely"
     elif change:
       action = "updated remotely"
@@ -676,10 +681,10 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     message = format_html(
       _("The {name} “{obj}” has been {action}{preview}."),
       **{
-        'name': campaign._meta.verbose_name,
-        'obj': campaign,
-        'action': action,
-        'preview': preview,
+        "name": campaign._meta.verbose_name,
+        "obj": campaign,
+        "action": action,
+        "preview": preview,
       },
     )
     self.message_user(request, message)
@@ -689,25 +694,25 @@ class CampaignSummaryAdmin(ViewModelAdmin):
   """Admin functionality for CTCT EmailCampaign Summary Report."""
 
   # ListView
-  search_fields = ('name', )
+  search_fields = ("name",)
   list_display = (
-    'campaign',
-    'open_rate',
-    'sends',
-    'opens',
-    'bounces',
-    'clicks',
-    'optouts',
-    'abuse',
+    "campaign",
+    "open_rate",
+    "sends",
+    "opens",
+    "bounces",
+    "clicks",
+    "optouts",
+    "abuse",
   )
 
   def get_queryset(self, request: HttpRequest) -> QuerySet[Model]:
-    qs = super().get_queryset(request)
+    qs: QuerySet[Model] = super().get_queryset(request)
     qs = qs.annotate(
       open_rate=Case(
         When(sends=0, then=0.0),
         default=Cast(
-          F('opens') * 1.0 / F('sends'),  # Avoid int division
+          F("opens") * 1.0 / F("sends"),  # Avoid int division
           output_field=FloatField(),
         ),
       ),
@@ -715,30 +720,40 @@ class CampaignSummaryAdmin(ViewModelAdmin):
     return qs
 
   @admin.display(
-    description=_('Open Rate'),
-    ordering='open_rate',
+    description=_("Open Rate"),
+    ordering="open_rate",
   )
   def open_rate(self, obj: EmailCampaign) -> str:
-    assert hasattr(obj, 'open_rate')
-    return f'{obj.open_rate:0.0%}'
+    assert hasattr(obj, "open_rate")
+    return f"{obj.open_rate:0.0%}"
 
   # ChangeView
   fieldsets = (
-    (None, {
-      'fields': (
-        'campaign',
-      ),
-    }),
-    ('ANALYTICS', {
-      'fields': (
-        'sends', 'opens', 'clicks', 'forwards',
-        'optouts', 'abuse', 'bounces', 'not_opened',
-      ),
-    }),
+    (
+      None,
+      {
+        "fields": ("campaign",),
+      },
+    ),
+    (
+      "ANALYTICS",
+      {
+        "fields": (
+          "sends",
+          "opens",
+          "clicks",
+          "forwards",
+          "optouts",
+          "abuse",
+          "bounces",
+          "not_opened",
+        ),
+      },
+    ),
   )
 
 
-if getattr(settings, 'CTCT_USE_ADMIN', False):
+if getattr(settings, "CTCT_USE_ADMIN", False):
   admin.site.register(ContactList, ContactListAdmin)
   admin.site.register(CustomField, CustomFieldAdmin)
   admin.site.register(Contact, ContactAdmin)

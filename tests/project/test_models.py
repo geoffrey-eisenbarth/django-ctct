@@ -1,33 +1,30 @@
-from typing import Type, TypeVar, Generic
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from parameterized import parameterized_class
 import requests_mock
-
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from parameterized import parameterized_class
 
 from django_ctct.models import (
+  CampaignActivity,
+  Contact,
+  ContactCustomField,
+  ContactList,
+  CTCTEndpointModel,
+  CustomField,
+  EmailCampaign,
   JsonDict,
-  CTCTEndpointModel, CustomField, ContactList,
-  Contact, ContactCustomField,
-  EmailCampaign, CampaignActivity,
 )
 from django_ctct.signals import remote_delete
-
-from tests.factories import get_factory, TokenFactory
-
-
-E = TypeVar('E', bound=CTCTEndpointModel)
+from tests.factories import TokenFactory, get_factory
 
 
-class RequestsMockMixin(Generic[E]):
-
-  model: Type[E]
+class RequestsMockMixin[E: CTCTEndpointModel]:
+  model: type[E]
 
   def setUp(self) -> None:
     # Set up mock API
@@ -71,11 +68,11 @@ class RequestsMockMixin(Generic[E]):
     """Mock the API response dict."""
 
     # Serialize factory obj
-    data = self.model.serializer.serialize(obj, field_types='all')
+    data = self.model.serializer.serialize(obj, field_types="all")
 
     # Set timestamps
     ts_now = timezone.now().strftime(self.model.serializer.TS_FORMAT)
-    for field in ['created_at', 'updated_at']:
+    for field in ["created_at", "updated_at"]:
       if data.get(field, False) is None:
         data[field] = ts_now
 
@@ -85,19 +82,18 @@ class RequestsMockMixin(Generic[E]):
     # Mock CTCT's creation of the primary email CampaignActivity
     if isinstance(obj, EmailCampaign) and obj.pk is None:
       campaign_activity = {
-        'campaign_activity_id': str(uuid4()),
-        'role': 'primary_email',
+        "campaign_activity_id": str(uuid4()),
+        "role": "primary_email",
       }
-      data['campaign_activities'] = [campaign_activity]
+      data["campaign_activities"] = [campaign_activity]
 
     return data
 
 
-class TestCRUD(RequestsMockMixin[E]):
-
+class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
   __test__ = False
 
-  model: Type[E]
+  model: type[E]
 
   def create_obj(self, obj: E) -> E:
     message = _("Must define `create_obj` on the inheriting class.")
@@ -111,7 +107,7 @@ class TestCRUD(RequestsMockMixin[E]):
     message = _("Must define `delete_obj` on the inheriting class.")
     raise ImproperlyConfigured(message)
 
-  @patch('django_ctct.models.Token.decode')
+  @patch("django_ctct.models.Token.decode")
   def test_create(self, token_decode: MagicMock) -> None:
     """Test object creation in Django."""
 
@@ -131,10 +127,10 @@ class TestCRUD(RequestsMockMixin[E]):
       # Set up the mock request for updating the CampaignActivity
       # (may or may not be used depending on the situation)
       # TODO: GH #13
-      api_response = api_response['campaign_activities'][0]
+      api_response = api_response["campaign_activities"][0]
       self.mock_api.put(
         url=CampaignActivity.remote.get_url(
-          api_id=api_response['campaign_activity_id'],
+          api_id=api_response["campaign_activity_id"],
         ),
         status_code=200,
         json=api_response,
@@ -146,10 +142,13 @@ class TestCRUD(RequestsMockMixin[E]):
     assert obj.api_id is not None
 
     # Verify the number of requests that were made
-    if isinstance(obj, EmailCampaign) and obj.campaign_activities.filter(
-      role='primary_email',
-      contact_lists__isnull=False,
-    ).exists():
+    if (
+      isinstance(obj, EmailCampaign)
+      and obj.campaign_activities.filter(
+        role="primary_email",
+        contact_lists__isnull=False,
+      ).exists()
+    ):
       # CampaignActivity had to be saved remotely to set contact_lists
       num_requests = 2
     else:
@@ -157,7 +156,7 @@ class TestCRUD(RequestsMockMixin[E]):
 
     assert self.mock_api.call_count == num_requests
 
-  @patch('django_ctct.models.Token.decode')
+  @patch("django_ctct.models.Token.decode")
   def test_update(self, token_decode: MagicMock) -> None:
     """Test object update in Django."""
 
@@ -167,7 +166,7 @@ class TestCRUD(RequestsMockMixin[E]):
     other_obj = self.factory.build()
     other_obj_data = self.model.serializer.serialize(
       obj=other_obj,
-      field_types='editable',
+      field_types="editable",
     )
     for field_name, value in other_obj_data.copy().items():
       if value and hasattr(self.existing_obj, field_name):
@@ -178,7 +177,7 @@ class TestCRUD(RequestsMockMixin[E]):
     # Set up API mocker
     api_response = self.get_api_response(self.existing_obj)
     self.mock_api.register_uri(
-      'PATCH' if (self.model is EmailCampaign) else 'PUT',
+      "PATCH" if (self.model is EmailCampaign) else "PUT",
       url=self.model.remote.get_url(api_id=self.existing_obj.api_id),
       status_code=200,
       json=api_response,
@@ -187,7 +186,9 @@ class TestCRUD(RequestsMockMixin[E]):
     update_related = False  # TODO: GH #13
     if isinstance(self.existing_obj, EmailCampaign) and update_related:
       # Set up the mock request for updating the CampaignActivity
-      campaign_activity = self.existing_obj.campaign_activities.get(role='primary_email')  # noqa: E501
+      campaign_activity = self.existing_obj.campaign_activities.get(
+        role="primary_email"
+      )  # noqa: E501
       self.mock_api.put(
         url=CampaignActivity.remote.get_url(api_id=campaign_activity.api_id),
         status_code=200,
@@ -207,7 +208,7 @@ class TestCRUD(RequestsMockMixin[E]):
     # Verify the number of requests that were made
     assert self.mock_api.call_count == num_requests
 
-  @patch('django_ctct.models.Token.decode')
+  @patch("django_ctct.models.Token.decode")
   def test_delete(self, token_decode: MagicMock) -> None:
     """Test object deletion in Django."""
 
@@ -217,7 +218,7 @@ class TestCRUD(RequestsMockMixin[E]):
     self.mock_api.delete(
       url=self.model.remote.get_url(api_id=self.existing_obj.api_id),
       status_code=204,
-      text='',
+      text="",
     )
 
     self.delete_obj(self.existing_obj)
@@ -235,12 +236,11 @@ class TestCRUD(RequestsMockMixin[E]):
 
 
 @parameterized_class(
-  ('model', ),
-  [(ContactList, ), (CustomField, ), (Contact, ), (EmailCampaign, )],
+  ("model",),
+  [(ContactList,), (CustomField,), (Contact,), (EmailCampaign,)],
 )
-class ModelTest(TestCRUD[E], TestCase):
-
-  model: Type[E]
+class ModelTest[E: CTCTEndpointModel](TestCRUD[E], TestCase):
+  model: type[E]
 
   @classmethod
   def setUpClass(cls) -> None:
@@ -286,12 +286,11 @@ class ModelTest(TestCRUD[E], TestCase):
     remote_delete(self.model, obj)
 
 
-@patch('django_ctct.models.Token.decode')
+@patch("django_ctct.models.Token.decode")
 class CampaignActivityTests(
   RequestsMockMixin[CampaignActivity],
   TestCase,
 ):
-
   model = CampaignActivity
 
   def test_send_preview(self, token_decode: MagicMock) -> None:
@@ -302,7 +301,7 @@ class CampaignActivityTests(
     self.mock_api.post(
       url=self.model.remote.get_url(
         api_id=self.existing_obj.api_id,
-        endpoint_suffix='/tests',
+        endpoint_suffix="/tests",
       ),
       status_code=200,
       json=api_response,
@@ -312,10 +311,10 @@ class CampaignActivityTests(
     CampaignActivity.remote.send_preview(
       self.existing_obj,
       recipients=[
-        'preview1@example.com',
-        'preview2@example.com',
+        "preview1@example.com",
+        "preview2@example.com",
       ],
-      message='This is a preview message.'
+      message="This is a preview message.",
     )
 
     # Verify API was called
@@ -334,7 +333,7 @@ class CampaignActivityTests(
     self.mock_api.post(
       url=self.model.remote.get_url(
         api_id=self.existing_obj.api_id,
-        endpoint_suffix='/schedules',
+        endpoint_suffix="/schedules",
       ),
       status_code=201,
       json=api_response,
@@ -347,13 +346,13 @@ class CampaignActivityTests(
     assert self.mock_api.call_count == 1
 
     # Non-primary role should raise
-    self.existing_obj.role = 'permalink'
+    self.existing_obj.role = "permalink"
     self.existing_obj.save()
     with self.assertRaises(ValueError):
       CampaignActivity.remote.schedule(self.existing_obj)
 
     # Require scheduled_datetime
-    self.existing_obj.role = 'primary_email'
+    self.existing_obj.role = "primary_email"
     campaign.scheduled_datetime = None
     campaign.save()
     with self.assertRaises(ValueError):
@@ -373,7 +372,7 @@ class CampaignActivityTests(
     self.mock_api.delete(
       url=self.model.remote.get_url(
         api_id=self.existing_obj.api_id,
-        endpoint_suffix='/schedules',
+        endpoint_suffix="/schedules",
       ),
       status_code=204,
     )
@@ -385,7 +384,7 @@ class CampaignActivityTests(
     assert self.mock_api.call_count == 1
 
     # Non-primary role should raise
-    self.existing_obj.role = 'resend'
+    self.existing_obj.role = "resend"
     self.existing_obj.save()
     with self.assertRaises(ValueError):
       CampaignActivity.remote.unschedule(self.existing_obj)

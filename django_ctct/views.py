@@ -8,7 +8,7 @@ from django_ctct.models import Token
 def auth(request: HttpRequest) -> HttpResponse:
   """Facilitates OAuth2 authentication with CTCT."""
 
-  if auth_code := request.GET.get('code'):
+  if auth_code := request.GET.get("code"):
     try:
       Token.remote.create(auth_code)
     except Exception as e:

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Type, TypeAlias
 
 from django.db.models import (
-  Model, OneToOneField, ManyToManyField, ForeignKey, ManyToOneRel,
+  ForeignKey,
+  ManyToManyField,
+  ManyToOneRel,
+  Model,
+  OneToOneField,
 )
 from django.utils import timezone
 
-
-RelatedFields: TypeAlias = tuple[
+type RelatedFields = tuple[
   list[OneToOneField[Model]],
   list[ManyToManyField[Model, Model]],
   list[ForeignKey[Model]],
@@ -17,16 +19,16 @@ RelatedFields: TypeAlias = tuple[
 ]
 
 
-def to_dt(s: str, ts_format: str = '%Y-%m-%dT%H:%M:%SZ') -> dt.datetime:
-  if '.' in s:
+def to_dt(s: str, ts_format: str = "%Y-%m-%dT%H:%M:%SZ") -> dt.datetime:
+  if "." in s:
     # Remove milliseconds
-    s = s.split('.')[0]
-  if ts_format.endswith('Z') and not s.endswith('Z'):
-    s += 'Z'
+    s = s.split(".")[0]
+  if ts_format.endswith("Z") and not s.endswith("Z"):
+    s += "Z"
   return timezone.make_aware(dt.datetime.strptime(s, ts_format))
 
 
-def get_related_fields(model: Type[Model]) -> RelatedFields:
+def get_related_fields(model: type[Model]) -> RelatedFields:
   one_to_ones: list[OneToOneField[Model]] = []
   many_to_manys: list[ManyToManyField[Model, Model]] = []
   foreign_keys: list[ForeignKey[Model]] = []

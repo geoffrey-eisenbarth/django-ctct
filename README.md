@@ -24,7 +24,7 @@ In your Django project's settings.py file, add `'django_ctct'` to the `'INSTALLE
 ```python
 INSTALLED_APPS = [
   # ... django apps
-  'django_ctct',
+  "django_ctct",
   # ... other apps
 ]
 ```
@@ -38,8 +38,8 @@ from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
-  path('admin/', admin.site.urls),
-  path('django-ctct/', include('django_ctct.urls')),
+  path("admin/", admin.site.urls),
+  path("django-ctct/", include("django_ctct.urls")),
   # ... other URL patterns
 ]
 ```
@@ -63,27 +63,27 @@ CTCT_FROM_EMAIL = "YOUR_EMAIL_ADDRESS"
 # Optional settings, callables will receive the EmailCampaign object as an argument
 CTCT_REPLY_TO_EMAIL = "YOUR_REPLY_TO_ADDRESS"
 CTCT_PHYSICAL_ADDRESS = {
-  'address_line1': '1060 W Addison St',
-  'address_line2': '',
-  'address_optional': '',
-  'city': 'Chicago',
-  'country_code': 'US',
-  'country_name': 'United States',
-  'organization_name': 'Wrigley Field',
-  'postal_code': '60613',
-  'state_code': 'IL',
+  "address_line1": "1060 W Addison St",
+  "address_line2": "",
+  "address_optional": "",
+  "city": "Chicago",
+  "country_code": "US",
+  "country_name": "United States",
+  "organization_name": "Wrigley Field",
+  "postal_code": "60613",
+  "state_code": "IL",
 }
 CTCT_PREVIEW_RECIPIENTS = (
-  ('First Recipient', 'first@recipient.com'),
-  ('Second Recipient', 'second@recipient.com'),
+  ("First Recipient", "first@recipient.com"),
+  ("Second Recipient", "second@recipient.com"),
 )
 CTCT_PREVIEW_RECIPIENTS_CALLABLE = "myproject.myapp.ctct.get_preview_recipients"
 CTCT_PREVIEW_MESSAGE = "This is an EmailCampaign preview."
 CTCT_PREVIEW_MESSAGE_CALLABLE = "myproject.myapp.ctct.get_preview_message"
 
 # Optional functionality settings and their default settings
-CTCT_USE_ADMIN = False       # Add django-ctct models to admin
-CTCT_SYNC_ADMIN = False      # Django admin CRUD operations will sync with ctct account
+CTCT_USE_ADMIN = False  # Add django-ctct models to admin
+CTCT_SYNC_ADMIN = False  # Django admin CRUD operations will sync with ctct account
 ```
 
 **Important:** Store your API credentials securely. Avoid committing them directly to your version control repository.
@@ -134,16 +134,22 @@ To install dev dependencies:
 ```bash
 > git clone git@github.com:geoffrey-eisenbarth/django-ctct.git
 > cd django-ctct
-> python -m pip install --upgrade pip
-> pip intall poetry
-> poetry install --with dev
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> uv sync --group dev
 ```
 
 To run tests:
 
 ```bash
-> poetry run coverage run tests/project/manage.py test
-> poetry run coverage report
+> uv run coverage run tests/project/manage.py test
+> uv run coverage report
+```
+
+To lint and format:
+
+```bash
+> uv run ruff check .
+> uv run ruff format .
 ```
 
 

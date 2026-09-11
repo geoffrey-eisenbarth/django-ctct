@@ -1,26 +1,30 @@
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import Type, TypeVar, Any, Collection, Literal, cast
+from collections.abc import Collection
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
-from tqdm import tqdm
-
-import django
+from django.core.management.base import BaseCommand
 from django.db.models import Model
 from django.utils.translation import gettext as _
-from django.core.management.base import BaseCommand
+from tqdm import tqdm
 
 from django_ctct.models import (
-  CTCTModel, CTCTEndpointModel, ContactList, CustomField,
-  Contact, ContactCustomField,
-  EmailCampaign, CampaignActivity, CampaignSummary,
-  RelatedObjects, is_ctct
+  CampaignActivity,
+  CampaignSummary,
+  Contact,
+  ContactCustomField,
+  ContactList,
+  CTCTEndpointModel,
+  CTCTModel,
+  CustomField,
+  EmailCampaign,
+  RelatedObjects,
 )
 from django_ctct.utils import get_related_fields
 
-
-M = TypeVar('M', bound=Model)
-E = TypeVar('E', bound=CTCTEndpointModel, covariant=True)
+M = TypeVar("M", bound=Model)
+E = TypeVar("E", bound=CTCTEndpointModel, covariant=True)
 
 
 class Command(BaseCommand):
@@ -39,9 +43,9 @@ class Command(BaseCommand):
 
   """
 
-  help = 'Imports data from ConstantContact'
+  help = "Imports data from ConstantContact"
 
-  CTCT_MODELS: list[Type[CTCTEndpointModel]] = [
+  CTCT_MODELS: list[type[CTCTEndpointModel]] = [
     ContactList,
     CustomField,
     Contact,
@@ -50,62 +54,45 @@ class Command(BaseCommand):
     CampaignSummary,
   ]
 
-  def get_id_to_pk(
-    self,
-    model: Type[M] | Literal['self']
-  ) -> dict[str, int]:
-    """Returns a dictionary to convert CTCT API ids to Django pks."""
-    if is_ctct(model):
-      id_to_pk = {
-        str(api_id): int(pk)
-        for api_id, pk in model.objects.values_list('api_id', 'pk')
-        if api_id is not None
-      }
-    else:
-      id_to_pk = {}
-    return id_to_pk
-
   def upsert(
     self,
-    model: Type[M],
+    model: type[M],
     objs: list[M],
     update_conflicts: bool = True,
-    unique_fields: Collection[str] | None = ['api_id'],
+    unique_fields: Collection[str] | None = ["api_id"],
     update_fields: Collection[str] | None = None,
     silent: bool | None = None,
-  ) -> list[Model]:
+  ) -> list[M]:
     """Perform upsert using `bulk_create()`."""
 
-    verb = 'Imported' if (update_fields is None) else 'Updated'
+    verb = "Imported" if (update_fields is None) else "Updated"
     if silent is None:
       silent = self.noinput
 
-    if model._meta.auto_created and hasattr(model, 'contactlist_id'):
+    if model._meta.auto_created and hasattr(model, "contactlist_id"):
       # Delete existing through model instances
       model.objects.all().delete()  # type: ignore
       update_conflicts = False
       unique_fields = update_fields = None
     elif issubclass(model, ContactCustomField):
       update_conflicts = True
-      unique_fields = ['contact_id', 'custom_field_id']
-      update_fields = ['value']
+      unique_fields = ["contact_id", "custom_field_id"]
+      update_fields = ["value"]
     elif issubclass(model, CampaignSummary):
       update_conflicts = True
-      unique_fields = ['campaign_id']
+      unique_fields = ["campaign_id"]
       update_fields = model.API_READONLY_FIELDS[1:]
     elif update_fields is None:
       update_fields = [
-        f.name
-        for f in model._meta.fields
-        if not f.primary_key and (f.name != 'api_id')
+        f.name for f in model._meta.fields if not f.primary_key and (f.name != "api_id")
       ]
 
     # Remove possible duplicates (CTCT API can't be trusted)
     id_field: str | None = None
     if model is CampaignSummary:
-      id_field = 'campaign_id'
+      id_field = "campaign_id"
     elif issubclass(model, CTCTModel):
-      id_field = 'api_id'
+      id_field = "api_id"
 
     if id_field is not None:
       seen, unique_objs = set(), []
@@ -117,42 +104,30 @@ class Command(BaseCommand):
       unique_objs = objs
 
     # Perform the upsert
-    objs_w_pks = model.objects.bulk_create(  # type: ignore
+    objs_w_pks = model._default_manager.bulk_create(
       objs=unique_objs,
       update_conflicts=update_conflicts,
       unique_fields=unique_fields,
       update_fields=update_fields,
     )
-    if update_conflicts and (django.get_version() < '5.0'):
-      # In older versions, enabling the update_conflicts parameter prevented
-      # setting the primary key on each model instance.
-      if id_to_pk := self.get_id_to_pk(model):
-        for o in filter(lambda o: o.api_id is not None, objs_w_pks):
-          setattr(o, 'pk', id_to_pk[str(o.api_id)])
 
     # Inform the user
     if not silent:  # pragma: no cover
-      message = self.style.SUCCESS(
-        f'{verb} {len(objs):,} {model.__name__} instances.'
-      )
+      message = self.style.SUCCESS(f"{verb} {len(objs):,} {model.__name__} instances.")
       self.stdout.write(message)
 
     return objs_w_pks
 
   def set_related_object_pks(
     self,
-    model: Type[E],
+    model: type[E],
     objs_w_pks: list[M],
     per_obj_list_of_related_objs: list[list[RelatedObjects]],
   ) -> None:
     _, mtms, _, rfks = get_related_fields(model)
     field_name = {
-      field.remote_field.through: field.m2m_field_name()
-      for field in mtms
-    } | {
-      field.related_model: field.remote_field.name
-      for field in rfks
-    }
+      field.remote_field.through: field.m2m_field_name() for field in mtms
+    } | {field.related_model: field.remote_field.name for field in rfks}
 
     for obj_w_pk, list_of_related_objs in zip(
       objs_w_pks,
@@ -162,7 +137,7 @@ class Command(BaseCommand):
         for related_obj in related_objs:
           setattr(related_obj, field_name[related_model], obj_w_pk)
 
-  def import_model(self, model: Type[E]) -> None:
+  def import_model(self, model: type[E]) -> None:
     """Imports objects from CTCT into Django's database."""
 
     list_of_tuples: list[tuple[E, list[RelatedObjects]]]
@@ -219,13 +194,13 @@ class Command(BaseCommand):
         for related_model, objs in list_of_related_objs:
           if issubclass(related_model, CampaignActivity):
             for obj in cast(list[CampaignActivity], objs):
-              if obj.role == 'primary_email':
+              if obj.role == "primary_email":
                 obj.campaign_id = campaign.pk
                 obj.save()
 
     # Then, fetch CampaignActivity details
     activities = CampaignActivity.objects.filter(
-      role='primary_email',
+      role="primary_email",
       api_id__isnull=False,
     )
 
@@ -249,8 +224,8 @@ class Command(BaseCommand):
     self.upsert(
       model=CampaignActivity,
       objs=objs_w_pks,
-      unique_fields=['campaign_id', 'role'],
-      update_fields=['role', 'subject', 'preheader', 'html_content']
+      unique_fields=["campaign_id", "role"],
+      update_fields=["role", "subject", "preheader", "html_content"],
     )
 
     # Set Django object PK on related objects
@@ -275,23 +250,23 @@ class Command(BaseCommand):
     """Allow optional keyword arguments."""
 
     parser.add_argument(
-      '--noinput',
-      action='store_true',
+      "--noinput",
+      action="store_true",
       default=False,
-      help='Automatic yes to prompts',
+      help="Automatic yes to prompts",
     )
     parser.add_argument(
-      '--stats_only',
-      action='store_true',
+      "--stats_only",
+      action="store_true",
       default=False,
-      help='Only fetch EmailCampaign statistics',
+      help="Only fetch EmailCampaign statistics",
     )
 
   def handle(self, *args: Any, **kwargs: Any) -> None:
     """Primary access point for Django management command."""
 
-    self.noinput = kwargs['noinput']
-    self.stats_only = kwargs['stats_only']
+    self.noinput = kwargs["noinput"]
+    self.stats_only = kwargs["stats_only"]
 
     if self.stats_only:
       self.CTCT_MODELS = [CampaignSummary]
@@ -301,10 +276,10 @@ class Command(BaseCommand):
         note = "Note: This will result in 1 API request per EmailCampaign! "
       else:
         note = ""
-      question = _(f'Import {model.__name__}? {note}(y/n): ')
+      question = _(f"Import {model.__name__}? {note}(y/n): ")
 
-      if self.noinput or (input(question).lower()[0] == 'y'):
+      if self.noinput or (input(question).lower()[0] == "y"):
         self.import_model(model)
       else:  # pragma: no cover
-        message = _(f'Skipping {model.__name__}')
+        message = _(f"Skipping {model.__name__}")
         self.stdout.write(self.style.NOTICE(message))

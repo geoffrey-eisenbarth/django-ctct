@@ -2,9 +2,9 @@ __pycache__/
 *.py[cod]
 .*.sw*
 *.sqlite3
-poetry.lock
 .coverage
 coverage.xml
 test*.html
 htmlcov/
 tests/**/local_settings.py
+.venv/*

@@ -1,46 +1,55 @@
-from typing import TYPE_CHECKING, Type, TypeVar
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, TypeVar
 from unittest import SkipTest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from parameterized import parameterized_class
-
-from django.db import models
-from django.db.models import Model, QuerySet
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
+from django.db import models
+from django.db.models import Model, QuerySet
 from django.forms import model_to_dict
 from django.http import HttpRequest
-from django.test import TestCase, Client, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import gettext as _
+from parameterized import parameterized_class
 
 from django_ctct.models import (
-  JsonDict, CTCTEndpointModel,
-  CustomField, ContactList, Contact,
-  ContactCustomField, ContactNote,
-  EmailCampaign, CampaignActivity, CampaignSummary,
+  CampaignActivity,
+  CampaignSummary,
+  Contact,
+  ContactCustomField,
+  ContactList,
+  ContactNote,
+  CTCTEndpointModel,
+  CustomField,
+  EmailCampaign,
+  JsonDict,
 )
-
 from tests.factories import get_factory
 from tests.project.test_models import TestCRUD
-
 
 if TYPE_CHECKING:
   from django.test.client import _MonkeyPatchedWSGIResponse as TestHttpResponse
 
 
-E = TypeVar('E', bound=CTCTEndpointModel)
+E = TypeVar("E", bound=CTCTEndpointModel)
 
 
 @parameterized_class(
-  ('model', ),
-  [(ContactList, ), (CustomField, ), (Contact, ), (EmailCampaign, ),],
+  ("model",),
+  [
+    (ContactList,),
+    (CustomField,),
+    (Contact,),
+    (EmailCampaign,),
+  ],
 )
 @override_settings(CTCT_SYNC_ADMIN=True, CTCT_RAISE_FOR_API=True)
 class ModelAdminTest(TestCRUD[E], TestCase):
-
-  model: Type[E]
+  model: type[E]
 
   @classmethod
   def setUpClass(cls) -> None:
@@ -55,7 +64,9 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     # Set up client to access admin page
     self.client = Client()
     self.superuser = User.objects.create_superuser(
-      'admin', 'admin@example.com', 'password',
+      "admin",
+      "admin@example.com",
+      "password",
     )
     self.client.force_login(self.superuser)
 
@@ -93,12 +104,12 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
       # Include data for the management form
       for key, value in formset.management_form.initial.items():
-        inline_data[f'{formset.prefix}-{key}'] = value
+        inline_data[f"{formset.prefix}-{key}"] = value
 
       if obj.pk:
         # Include initial data and pks for existing related objects
         for i, form in enumerate(formset.initial_forms):
-          inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk
+          inline_data[f"{formset.prefix}-{i}-id"] = form.instance.pk
           for field_name, initial_value in form.initial.items():
             if isinstance(initial_value, (list, QuerySet)):
               # For ManyToMany, we need a list of PKs
@@ -110,22 +121,22 @@ class ModelAdminTest(TestCRUD[E], TestCase):
             else:
               value = initial_value
 
-            inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
-            inline_data[f'initial-{formset.prefix}-{i}-{field_name}'] = initial_value  # noqa: E501
+            inline_data[f"{formset.prefix}-{i}-{field_name}"] = value
+            inline_data[f"initial-{formset.prefix}-{i}-{field_name}"] = initial_value  # noqa: E501
 
         for i, form in enumerate(formset.initial_forms):
-          inline_data[f'{formset.prefix}-{i}-id'] = form.instance.pk
+          inline_data[f"{formset.prefix}-{i}-id"] = form.instance.pk
           for field in inline_admin.model._meta.get_fields():
             if field.name in form.initial:
               value = form.initial[field.name]
               if isinstance(value, (list, QuerySet)):
                 # For ManyToMany, we need a list of PKs
                 value = [o.pk for o in value]
-              inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+              inline_data[f"{formset.prefix}-{i}-{field_name}"] = value
             elif field.default is not models.NOT_PROVIDED:
               # Include related object defaults
-              default = '' if field.default is None else field.get_default()
-              inline_data[f'initial-{formset.prefix}-{i}-{field.name}'] = default  # noqa: E501
+              default = "" if field.default is None else field.get_default()
+              inline_data[f"initial-{formset.prefix}-{i}-{field.name}"] = default  # noqa: E501
 
       else:
         # Include new data for related object
@@ -149,35 +160,35 @@ class ModelAdminTest(TestCRUD[E], TestCase):
           data = inline_admin.model.serializer.serialize(related_obj)
           if inline_admin.model is CampaignActivity:
             # Factory can't specify ManyToManyField during build()
-            data['contact_lists'] = [cl.pk for cl in self.existing_lists]
+            data["contact_lists"] = [cl.pk for cl in self.existing_lists]
           elif inline_admin.model is ContactCustomField:
             # Make sure to use pk here
-            data['custom_field'] = related_obj.custom_field.pk
+            data["custom_field"] = related_obj.custom_field.pk
 
           for field_name, value in data.items():
-            inline_data[f'{formset.prefix}-{i}-{field_name}'] = value
+            inline_data[f"{formset.prefix}-{i}-{field_name}"] = value
 
           # Include defaults for new related objects
           for field in filter(
             lambda f: f.default is not models.NOT_PROVIDED,
             inline_admin.model._meta.get_fields(),
           ):
-            default = '' if field.default is None else field.get_default()
-            inline_data[f'initial-{formset.prefix}-{i}-{field.name}'] = default
+            default = "" if field.default is None else field.get_default()
+            inline_data[f"initial-{formset.prefix}-{i}-{field.name}"] = default
 
-        inline_data[f'{formset.prefix}-TOTAL_FORMS'] = len(related_objs)
+        inline_data[f"{formset.prefix}-TOTAL_FORMS"] = len(related_objs)
 
     return obj_data, inline_data
 
-  def assert_redirect(self, response: 'TestHttpResponse') -> None:
+  def assert_redirect(self, response: TestHttpResponse) -> None:
     """Verify response was a redirect (a 200 response implies form errors)."""
 
     if (response.status_code == 200) and (response.context is not None):
       # Check for form errors in a way that will display them to the dev
-      form = response.context['adminform']
+      form = response.context["adminform"]
       self.assertFalse(form.errors or form.non_field_errors())
 
-      for formset in response.context['inline_admin_formsets']:
+      for formset in response.context["inline_admin_formsets"]:
         self.assertFalse(formset.non_form_errors())
         for form in formset.forms:
           self.assertFalse(form.errors)
@@ -188,9 +199,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     """Create object using Django admin."""
 
     # Make a GET to the add object admin view
-    admin_add_path = reverse(
-      f'admin:django_ctct_{self.model.__name__.lower()}_add'
-    )
+    admin_add_path = reverse(f"admin:django_ctct_{self.model.__name__.lower()}_add")
     response = self.client.get(admin_add_path)
 
     # Make a POST to create the new object
@@ -210,7 +219,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     for key, value in obj_data.copy().items():
       if isinstance(value, list):
         # Must use .distinct() with a list
-        obj_data[f'{key}__in'] = obj_data.pop(key)
+        obj_data[f"{key}__in"] = obj_data.pop(key)
     obj = self.model.objects.filter(**obj_data).distinct().get()
     return obj
 
@@ -219,8 +228,8 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
     # Make a GET to the change object admin view
     admin_change_path = reverse(
-      f'admin:django_ctct_{self.model.__name__.lower()}_change',
-      args=(obj.pk, ),
+      f"admin:django_ctct_{self.model.__name__.lower()}_change",
+      args=(obj.pk,),
     )
     response = self.client.get(admin_change_path)
 
@@ -241,7 +250,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     for key, value in obj_data.copy().items():
       if isinstance(value, list):
         # Must use .distinct() with a list
-        obj_data[f'{key}__in'] = obj_data.pop(key)
+        obj_data[f"{key}__in"] = obj_data.pop(key)
     obj = self.model.objects.filter(**obj_data).distinct().get()
     return obj
 
@@ -250,16 +259,16 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
     # Make a POST to the delete object admin confirm view.
     admin_confirm_delete_path = reverse(
-      f'admin:django_ctct_{self.model.__name__.lower()}_delete',
-      args=(obj.pk, ),
+      f"admin:django_ctct_{self.model.__name__.lower()}_delete",
+      args=(obj.pk,),
     )
-    data = {'post': 'yes'}  # Click the confirm delete button
+    data = {"post": "yes"}  # Click the confirm delete button
     response = self.client.post(admin_confirm_delete_path, data)
 
     # Verify it redirected (form errors would result in a 200 response)
     self.assert_redirect(response)
 
-  @patch('django_ctct.models.Token.decode')
+  @patch("django_ctct.models.Token.decode")
   def test_bulk_delete(self, token_decode: MagicMock) -> None:
     """Test bulk deletion in Django admin."""
 
@@ -274,9 +283,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
     # Set up API mocker
     self.mock_api.post(
-      url=self.model.remote.get_url(
-        endpoint=self.model.API_ENDPOINT_BULK_DELETE
-      ),
+      url=self.model.remote.get_url(endpoint=self.model.API_ENDPOINT_BULK_DELETE),
       status_code=201,
       json={},  # Response is not used by django_ctct
     )
@@ -302,23 +309,29 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
 
 @parameterized_class(
-  ('model', ),
-  [(ContactNote, CampaignSummary, )],
+  ("model",),
+  [
+    (
+      ContactNote,
+      CampaignSummary,
+    )
+  ],
 )
 class ViewModelAdminTest(TestCase):
-
-  model: Type[Model]
+  model: type[Model]
 
   def setUp(self) -> None:
     self.client = Client()
     self.user = User.objects.create_user(
-      'user', 'user@example.com', 'password',
+      "user",
+      "user@example.com",
+      "password",
     )
     self.client.force_login(self.user)
 
   def test_permissions(self) -> None:
     admin_changelist_path = reverse(
-      f'admin:django_ctct_{self.model.__name__.lower()}_changelist'
+      f"admin:django_ctct_{self.model.__name__.lower()}_changelist"
     )
     response = self.client.get(admin_changelist_path)
     request = response.wsgi_request

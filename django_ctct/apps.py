@@ -5,21 +5,19 @@ from django.utils.translation import gettext_lazy as _
 
 
 class CTCTConfig(AppConfig):
-  name = 'django_ctct'
-  verbose_name = _('Constant Contact')
+  name = "django_ctct"
+  verbose_name = _("Constant Contact")
   required_settings = [
-    'CTCT_PUBLIC_KEY',
-    'CTCT_SECRET_KEY',
-    'CTCT_REDIRECT_URI',
-    'CTCT_FROM_NAME',
-    'CTCT_FROM_EMAIL',
+    "CTCT_PUBLIC_KEY",
+    "CTCT_SECRET_KEY",
+    "CTCT_REDIRECT_URI",
+    "CTCT_FROM_NAME",
+    "CTCT_FROM_EMAIL",
   ]
 
   def ready(self) -> None:
     """Validate that necessary settings have been defined."""
     for value in self.required_settings:
       if not hasattr(settings, value):
-        message = _(
-          f"[django-ctct] {value} must be defined in settings.py."
-        )
+        message = _(f"[django-ctct] {value} must be defined in settings.py.")
         raise ImproperlyConfigured(message)
