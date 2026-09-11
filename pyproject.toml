@@ -50,8 +50,15 @@ show_missing = true
 [tool.mypy]
 python_version = "3.10"
 plugins = ["mypy_django_plugin.main"]
+strict = true
 ignore_missing_imports = true
-exclude = ["vendor.py", "factories.py", "tests/project/manage.py", "tests/project/project"]
+packages = ["django_ctct", "tests"]
+exclude = [
+  "factories.py",
+  'django_ctct/migrations',
+  "tests/project/manage.py",
+  "tests/project/project",
+]
 
 [tool.django-stubs]
 django_settings_module = "tests.project.project.settings"
