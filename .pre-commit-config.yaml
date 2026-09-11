@@ -1,13 +1,15 @@
 repos:
   - repo: https://github.com/PyCQA/flake8
-    rev: '6.1.0' # Use the latest stable version
+    rev: '7.3.0'
     hooks:
       - id: flake8
+        args: [--config=.flake8]
+        exclude: ^django_ctct/migrations/
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.7.0' # Use the latest stable version
+    rev: 'v1.19.1'
     hooks:
       - id: mypy
-        args: [--config=pyproject.toml]
+        args: [--config-file=pyproject.toml]
         additional_dependencies:
           - django-stubs
           - django-stubs-ext
