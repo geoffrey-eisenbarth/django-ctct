@@ -2,15 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Iterable
-from typing import (
-  TYPE_CHECKING,
-  Any,
-  ClassVar,
-  Literal,
-  NoReturn,
-  TypeVar,
-  cast,
-)
+from typing import TYPE_CHECKING, Literal, NoReturn, cast
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -33,13 +25,14 @@ from requests.models import Response
 from django_ctct.utils import get_related_fields
 
 if TYPE_CHECKING:  # pragma: no cover
+  from typing import Any, ClassVar
+
   from django_ctct.models import (
     CampaignActivity,
     CampaignSummary,
     Contact,
     ContactList,
     CTCTEndpointModel,
-    CTCTModel,
     EmailCampaign,
     EndpointMixin,
     JsonDict,
@@ -48,13 +41,8 @@ if TYPE_CHECKING:  # pragma: no cover
     Token,
   )
 
-T = TypeVar("T", bound="EndpointMixin")
-E = TypeVar("E", bound="CTCTEndpointModel")
-C = TypeVar("C", bound="CTCTModel")
-S = TypeVar("S", bound="SerialModel")
 
-
-class ConnectionManagerMixin(Manager[T]):
+class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
   """Manager mixin for utilizing an API."""
 
   API_LIMIT_CALLS: int = 4  # four calls
@@ -204,7 +192,7 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
     return token
 
 
-class Serializer(Manager[S]):
+class Serializer[S: SerialModel](Manager[S]):
   TS_FORMAT: ClassVar[str] = "%Y-%m-%dT%H:%M:%SZ"
 
   def serialize(
@@ -378,7 +366,7 @@ class Serializer(Manager[S]):
 
     # Set related objects
     data = self.deserialize_related_obj_fields(data, parent_pk=pk)
-    data, related_objs = self.deserialize_related_objs_fields(data, parent_pk=pk)  # noqa: E501
+    data, related_objs = self.deserialize_related_objs_fields(data, parent_pk=pk)
 
     # Restrict to the fields defined in the Django object
     # NOTE: We prefer `field.attname` over `field.name` in order to pick up
@@ -408,14 +396,13 @@ class Serializer(Manager[S]):
     return (obj, related_objs)
 
 
-class RemoteManager(
+class RemoteManager[E: CTCTEndpointModel](
   ConnectionManagerMixin[E],
   Serializer[E],
   Manager[E],
 ):
   """Manager for utilizing the CTCT API."""
 
-  # @task(queue_name='ctct')
   def create(self, obj: E) -> E:  # type: ignore[override]
     """Creates an existing Django object on the remote server.
 
@@ -509,7 +496,6 @@ class RemoteManager(
 
     return list_of_tuples
 
-  # @task(queue_name='ctct')
   def update(self, obj: E) -> E:  # type: ignore[override]
     """Updates an existing Django object on the remote server.
 
@@ -541,7 +527,6 @@ class RemoteManager(
 
     return obj
 
-  # @task(queue_name='ctct')
   def delete(
     self,
     obj: E,
@@ -597,7 +582,6 @@ class RemoteManager(
 class ContactListRemoteManager(RemoteManager["ContactList"]):
   """Extend RemoteManager to handle adding multiple Contacts."""
 
-  # @task(queue_name='ctct')
   def add_list_memberships(
     self,
     contact_list: ContactList | None = None,
@@ -652,7 +636,7 @@ class ContactRemoteManager(RemoteManager["Contact"]):
         raise e
     return obj
 
-  def update_or_create(self, obj: Contact) -> Contact:  # type: ignore[override]  # noqa: E501
+  def update_or_create(self, obj: Contact) -> Contact:  # type: ignore[override]
     """Updates or creates the Contact based on `email`.
 
     Notes
@@ -716,8 +700,7 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
       data = super().serialize(obj, field_types)
     return data
 
-  # @task(queue_name='ctct')
-  def create(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]  # noqa: E501
+  def create(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]
     """Creates a local EmailCampaign on the remote servers.
 
     Notes
@@ -783,8 +766,7 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
 
     return obj
 
-  # @task(queue_name='ctct')
-  def update(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]  # noqa: E501
+  def update(self, obj: EmailCampaign) -> EmailCampaign:  # type: ignore[override]
     """Update EmailCampaign on remote servers.
 
     Notes
@@ -819,8 +801,7 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
 class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
   """Extend RemoteManager to handle scheduling."""
 
-  # @task(queue_name='ctct')
-  def create(self, obj: CampaignActivity) -> NoReturn:  # type: ignore[override]  # noqa: E501
+  def create(self, obj: CampaignActivity) -> NoReturn:  # type: ignore[override]
     raise NotImplementedError(
       _(
         "ConstantContact API does not support creating CampaignActivities. "
@@ -828,8 +809,7 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
       )
     )
 
-  # @task(queue_name='ctct')
-  def update(self, obj: CampaignActivity) -> CampaignActivity:  # type: ignore[override]  # noqa: E501
+  def update(self, obj: CampaignActivity) -> CampaignActivity:  # type: ignore[override]
     """Update CampaignActivity on remote servers.
 
     Notes
@@ -860,7 +840,6 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
 
     return obj
 
-  # @task(queue_name='ctct')
   def send_preview(
     self,
     obj: CampaignActivity,
@@ -896,7 +875,6 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
     )
     self.raise_or_json(response)
 
-  # @task(queue_name='ctct')
   def schedule(self, obj: CampaignActivity) -> None:
     """Schedules the `primary_email` CampaignActivity.
 
@@ -924,7 +902,6 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
     )
     self.raise_or_json(response)
 
-  # @task(queue_name='ctct')
   def unschedule(self, obj: CampaignActivity) -> None:
     """Unschedules the `primary_email` CampaignActivity."""
     if obj.role == "primary_email":

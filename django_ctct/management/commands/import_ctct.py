@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Collection
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from django.core.management.base import BaseCommand
@@ -23,8 +23,9 @@ from django_ctct.models import (
 )
 from django_ctct.utils import get_related_fields
 
-M = TypeVar("M", bound=Model)
-E = TypeVar("E", bound=CTCTEndpointModel, covariant=True)
+
+if TYPE_CHECKING:
+  from typing import Any
 
 
 class Command(BaseCommand):
@@ -54,7 +55,7 @@ class Command(BaseCommand):
     CampaignSummary,
   ]
 
-  def upsert(
+  def upsert[M: Model](
     self,
     model: type[M],
     objs: list[M],
@@ -118,7 +119,7 @@ class Command(BaseCommand):
 
     return objs_w_pks
 
-  def set_related_object_pks(
+  def set_related_object_pks[E: CTCTEndpointModel, M: Model](
     self,
     model: type[E],
     objs_w_pks: list[M],
@@ -137,7 +138,7 @@ class Command(BaseCommand):
         for related_obj in related_objs:
           setattr(related_obj, field_name[related_model], obj_w_pk)
 
-  def import_model(self, model: type[E]) -> None:
+  def import_model[E: CTCTEndpointModel](self, model: type[E]) -> None:
     """Imports objects from CTCT into Django's database."""
 
     list_of_tuples: list[tuple[E, list[RelatedObjects]]]

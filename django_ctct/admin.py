@@ -1,6 +1,5 @@
 import functools
 from collections.abc import Callable, Iterable
-from typing import TypeVar
 
 from django import forms
 from django.conf import settings
@@ -32,19 +31,9 @@ from django_ctct.models import (
 )
 from django_ctct.signals import remote_delete, remote_save
 
-M = TypeVar("M", bound=Model)
-
 
 def catch_api_errors[**P](func: Callable[P, None]) -> Callable[P, None]:
-  """Decorator to catch HTTP errors from CTCT API.
-
-  Notes
-  -----
-  If the wrapped functioms (e.g., `save_related()` didn't return `None`, then
-  we would need to adjust the types above to `Callable[P, R]`, where R is
-  defined as TypeVar('R').
-
-  """
+  """Decorator to catch HTTP errors from CTCT API."""
 
   @functools.wraps(func)
   def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
@@ -423,7 +412,7 @@ class ContactAdmin(RemoteModelAdmin[Contact]):
     setattr(obj, source_field, "Account")
     super().save_model(request, obj, form, change)
 
-  def save_formset(
+  def save_formset[M: Model](
     self,
     request: HttpRequest,
     form: ModelForm[Contact],
@@ -639,11 +628,11 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       # Handle remote saving the primary_email CampaignActivity
       inline_changed = formsets[0][0].changed_data and not campaign_created
       schedule_changed = "scheduled_datetime" in form.changed_data
-      preview_sent = ("send_preview" in form.changed_data) and campaign.send_preview  # noqa: E501
+      preview_sent = ("send_preview" in form.changed_data) and campaign.send_preview
       recipients_changed = "contact_lists" in formsets[0][0].changed_data
 
       if (
-        inline_changed or schedule_changed or preview_sent or recipients_changed  # noqa: E501
+        inline_changed or schedule_changed or preview_sent or recipients_changed
       ):
         # Refresh to get API id and remote save
         activity.refresh_from_db()
