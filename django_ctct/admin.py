@@ -33,7 +33,6 @@ from django_ctct.models import (
   EmailCampaign,
 )
 
-
 if TYPE_CHECKING:
   from typing import Any, Concatenate
 
