@@ -218,7 +218,7 @@ class Serializer[S: SerialModel](Manager[S]):
           # Object needs pk before relationship can be used
           continue
         else:
-          raise e
+          raise e  # pragma: no cover
 
       if value is None:
         # Don't include null values
@@ -255,9 +255,9 @@ class Serializer[S: SerialModel](Manager[S]):
           qs = value.all()
           data[field_name] = [qs.model.serializer.serialize(o, field_types) for o in qs]
       elif isinstance(value, models.Model):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
       else:
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     # Allow models to override manager serialization
     if hasattr(obj, "serialize"):
@@ -313,7 +313,7 @@ class Serializer[S: SerialModel](Manager[S]):
           for datum in data.pop(rfk_field.name)
         ]
       else:
-        continue
+        continue  # pragma: no cover
 
       if objs:
         related_objs = (RelatedModel, objs)

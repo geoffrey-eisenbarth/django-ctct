@@ -190,7 +190,7 @@ class Command(BaseCommand):
         _, list_of_related_objs = EmailCampaign.remote.get(campaign.api_id)
       except EmailCampaign.DoesNotExist:
         # Available in bulk endpoint but not detail endpoint
-        continue
+        continue  # pragma: no cover
       else:
         # Set related object pk and store in db
         for related_model, objs in list_of_related_objs:
@@ -215,7 +215,7 @@ class Command(BaseCommand):
         obj, list_of_related_objs = CampaignActivity.remote.get(activity.api_id)  # noqa: E501
       except CampaignActivity.DoesNotExist:
         # Came from EmailCampaign detail endpoint but doesn't exist elsewhere
-        continue
+        continue  # pragma: no cover
       else:
         obj.pk = activity.pk
         obj.campaign_id = activity.campaign_id

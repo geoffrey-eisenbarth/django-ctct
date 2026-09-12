@@ -56,7 +56,7 @@ def catch_api_errors[S: admin.ModelAdmin[Any], **P](
         elif isinstance(kwarg_request, HttpRequest):
           request = kwarg_request
         else:
-          raise
+          raise e  # pragma: no cover
         self.message_user(
           request=request,
           message=format_html(_("ConstantContact: {error}"), error=str(e)),
@@ -131,7 +131,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     obj.delete()
     if self.sync_admin:
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
       else:
         self.model.remote.delete(obj)
 
@@ -143,7 +143,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
   ) -> None:
     if self.sync_admin:
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
       else:
         queryset.model.remote.bulk_delete(queryset)
     queryset.delete()
@@ -181,7 +181,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     if self.sync_admin:
       # Remote save the primary object after related objects have been saved
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
       elif change:
         self.model.remote.update(form.instance)
       else:
@@ -630,7 +630,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
   ) -> None:
     if self.sync_admin:
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
       campaign = form.instance
       activity = formsets[0][0].instance
