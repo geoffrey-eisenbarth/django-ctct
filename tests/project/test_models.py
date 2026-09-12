@@ -2,12 +2,13 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+from parameterized import parameterized_class
 import requests_mock
+
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.translation import gettext as _
-from parameterized import parameterized_class
 
 from django_ctct.models import (
   CampaignActivity,
@@ -19,7 +20,6 @@ from django_ctct.models import (
   EmailCampaign,
   JsonDict,
 )
-from django_ctct.signals import remote_delete
 from tests.factories import TokenFactory, get_factory
 
 
@@ -283,7 +283,7 @@ class ModelTest[E: CTCTEndpointModel](TestCRUD[E], TestCase):
   def delete_obj(self, obj: E) -> None:
     """Delete the object locally and remotely."""
     obj.delete()
-    remote_delete(self.model, obj)
+    self.model.remote.delete(obj)
 
 
 @patch("django_ctct.models.Token.decode")

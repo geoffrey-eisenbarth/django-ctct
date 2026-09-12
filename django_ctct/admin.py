@@ -29,7 +29,6 @@ from django_ctct.models import (
   CustomField,
   EmailCampaign,
 )
-from django_ctct.signals import remote_delete, remote_save
 
 
 def catch_api_errors[**P](func: Callable[P, None]) -> Callable[P, None]:
@@ -116,10 +115,13 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
 
   # ChangeView
   @catch_api_errors
-  def delete_model(self, request: HttpRequest, obj: Model) -> None:
+  def delete_model(self, request: HttpRequest, obj: E) -> None:
     obj.delete()
     if self.sync_admin:
-      remote_delete(sender=self.model, instance=obj)
+      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+        raise NotImplementedError
+      else:
+        self.model.remote.delete(obj)
 
   @catch_api_errors
   def delete_queryset(
@@ -128,7 +130,10 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     queryset: QuerySet[E],
   ) -> None:
     if self.sync_admin:
-      queryset.model.remote.bulk_delete(queryset)
+      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+        raise NotImplementedError
+      else:
+        queryset.model.remote.bulk_delete(queryset)
     queryset.delete()
 
   @catch_api_errors
@@ -163,11 +168,12 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
   ) -> None:
     if self.sync_admin:
       # Remote save the primary object after related objects have been saved
-      remote_save(
-        sender=self.model,
-        instance=form.instance,
-        created=not change,
-      )
+      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+        raise NotImplementedError
+      elif change:
+        self.model.remote.update(form.instance)
+      else:
+        self.model.remote.create(form.instance)
 
 
 class ContactListForm(forms.ModelForm[ContactList]):
@@ -611,6 +617,10 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     change: bool,
   ) -> None:
     if self.sync_admin:
+
+      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+        raise NotImplementedError
+
       campaign = form.instance
       activity = formsets[0][0].instance
 
@@ -618,12 +628,10 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       # NOTE: The only EmailCampaign field that can be updated is 'name'
       campaign_created = not change
       campaign_updated = change and ("name" in form.changed_data)
-      if campaign_created or campaign_updated:
-        remote_save(
-          sender=self.model,
-          instance=campaign,
-          created=campaign_created,
-        )
+      if campaign_created:
+        EmailCampaign.remote.create(campaign)  # type: ignore[misc]
+      elif campaign_updated:
+        EmailCampaign.remote.update(campaign)
 
       # Handle remote saving the primary_email CampaignActivity
       inline_changed = formsets[0][0].changed_data and not campaign_created
@@ -635,8 +643,9 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
         inline_changed or schedule_changed or preview_sent or recipients_changed
       ):
         # Refresh to get API id and remote save
+        assert isinstance(activity, CampaignActivity)
         activity.refresh_from_db()
-        remote_save(sender=CampaignActivity, instance=activity, created=False)
+        CampaignActivity.remote.update(activity)
 
         # Inform the user
         self.ctct_message_user(request, form, formsets, change)

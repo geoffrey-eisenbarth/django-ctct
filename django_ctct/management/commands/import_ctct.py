@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Collection
@@ -22,7 +24,6 @@ from django_ctct.models import (
   RelatedObjects,
 )
 from django_ctct.utils import get_related_fields
-
 
 if TYPE_CHECKING:
   from typing import Any
