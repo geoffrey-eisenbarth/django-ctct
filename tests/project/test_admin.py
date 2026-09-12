@@ -307,14 +307,27 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     # Verify the number of requests that were made
     self.assertEqual(self.mock_api.call_count, num_calls)
 
+  def test_changelist_view(self) -> None:
+    """Visiting the changelist renders list_display callables."""
+
+    admin_changelist_path = reverse(
+      f"admin:django_ctct_{self.model.__name__.lower()}_changelist"
+    )
+    response = self.client.get(admin_changelist_path)
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.context["cl"].result_count, 1)
+
+    if self.model is Contact:
+      for value in ("sync", "not_synced", "optout"):
+        response = self.client.get(admin_changelist_path, {"ctct": value})
+        self.assertEqual(response.status_code, 200)
+
 
 @parameterized_class(
   ("model",),
   [
-    (
-      ContactNote,
-      CampaignSummary,
-    )
+    (ContactNote,),
+    (CampaignSummary,),
   ],
 )
 class ViewModelAdminTest(TestCase):
@@ -329,6 +342,10 @@ class ViewModelAdminTest(TestCase):
     )
     self.client.force_login(self.user)
 
+    # A couple of objects so the changelist actually renders rows,
+    # exercising get_queryset()/list_display callables/list_filter lookups.
+    get_factory(self.model).create_batch(2)
+
   def test_permissions(self) -> None:
     admin_changelist_path = reverse(
       f"admin:django_ctct_{self.model.__name__.lower()}_changelist"
@@ -340,3 +357,26 @@ class ViewModelAdminTest(TestCase):
     self.assertFalse(model_admin.has_add_permission(request))
     self.assertFalse(model_admin.has_change_permission(request, obj=None))
     self.assertFalse(model_admin.has_delete_permission(request, obj=None))
+
+  def test_changelist_view(self) -> None:
+    """Superusers can view (read-only) the changelist, rendering all rows."""
+
+    superuser = User.objects.create_superuser(
+      "admin",
+      "admin@example.com",
+      "password",
+    )
+    client = Client()
+    client.force_login(superuser)
+
+    admin_changelist_path = reverse(
+      f"admin:django_ctct_{self.model.__name__.lower()}_changelist"
+    )
+    response = client.get(admin_changelist_path)
+
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.context["cl"].result_count, 2)
+
+    # Superusers are still allowed to delete
+    model_admin = admin.site._registry[self.model]
+    self.assertTrue(model_admin.has_delete_permission(response.wsgi_request))
