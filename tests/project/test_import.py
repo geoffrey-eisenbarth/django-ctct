@@ -59,7 +59,7 @@ class TestImportCommand(TestCase):
     CampaignSummary: 50,
   }
   per_request: dict[type[CTCTEndpointModel], int] = {
-    ContactList: 50,  # limit in [1, 1000]
+    ContactList: 25,  # Split into 2 pages to test pagination (limit in [1, 1000])
     CustomField: 50,  # limit in [1, 100]
     Contact: 50,  # limit in [1, 500]
     EmailCampaign: 50,  # limit in [1, 500]
@@ -195,6 +195,26 @@ class TestImportCommand(TestCase):
             status_code=200,
             json=datum,
           )
+      elif model is ContactList:
+        # Split the response across two pages to test pagination
+        page_size = self.per_request[ContactList]
+        page_1_data = self.data[ContactList][:page_size]
+        page_2_data = self.data[ContactList][page_size:]
+        next_endpoint = f"{ContactList.API_ENDPOINT}?cursor=page2"
+
+        self.mock_api.get(
+          url=self.get_api_url(model),
+          status_code=200,
+          json={
+            "data": page_1_data,
+            "_links": {"next": {"href": next_endpoint}},
+          },
+        )
+        self.mock_api.get(
+          url=f"{model.API_URL}{model.API_VERSION}{next_endpoint}",
+          status_code=200,
+          json={"data": page_2_data},
+        )
       else:
         # Mock the bulk GET request
         self.mock_api.get(
