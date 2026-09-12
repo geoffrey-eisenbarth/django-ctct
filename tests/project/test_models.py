@@ -2,13 +2,12 @@ import unittest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from parameterized import parameterized_class
 import requests_mock
-
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from parameterized import parameterized_class
 
 from django_ctct.models import (
   CampaignActivity,

@@ -617,7 +617,6 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     change: bool,
   ) -> None:
     if self.sync_admin:
-
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
         raise NotImplementedError
 
@@ -639,9 +638,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       preview_sent = ("send_preview" in form.changed_data) and campaign.send_preview
       recipients_changed = "contact_lists" in formsets[0][0].changed_data
 
-      if (
-        inline_changed or schedule_changed or preview_sent or recipients_changed
-      ):
+      if inline_changed or schedule_changed or preview_sent or recipients_changed:
         # Refresh to get API id and remote save
         assert isinstance(activity, CampaignActivity)
         activity.refresh_from_db()
