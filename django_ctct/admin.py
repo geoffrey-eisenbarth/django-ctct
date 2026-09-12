@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import functools
 from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING
 
 from django import forms
 from django.conf import settings
@@ -31,23 +34,33 @@ from django_ctct.models import (
 )
 
 
-def catch_api_errors[**P](func: Callable[P, None]) -> Callable[P, None]:
+if TYPE_CHECKING:
+  from typing import Any, Concatenate
+
+
+def catch_api_errors[S: admin.ModelAdmin[Any], **P](
+  func: Callable[Concatenate[S, P], None],
+) -> Callable[Concatenate[S, P], None]:
   """Decorator to catch HTTP errors from CTCT API."""
 
   @functools.wraps(func)
-  def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+  def wrapper(self: S, /, *args: P.args, **kwargs: P.kwargs) -> None:
     try:
-      return func(*args, **kwargs)
+      return func(self, *args, **kwargs)
     except HTTPError as e:
       if getattr(settings, "CTCT_RAISE_FOR_API", False):
         raise e
       else:
-        self, request, *x = args
-        assert isinstance(self, admin.ModelAdmin)
-        assert isinstance(request, HttpRequest)
+        kwarg_request = kwargs.get("request")
+        if args and isinstance(args[0], HttpRequest):
+          request = args[0]
+        elif isinstance(kwarg_request, HttpRequest):
+          request = kwarg_request
+        else:
+          raise
         self.message_user(
           request=request,
-          message=format_html(_(f"ConstantContact: {e}")),
+          message=format_html(_("ConstantContact: {error}"), error=str(e)),
           level=messages.ERROR,
         )
 
