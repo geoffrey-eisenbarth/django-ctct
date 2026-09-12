@@ -453,6 +453,15 @@ class ModelAdminTest(TestCRUD[E], TestCase):
           status_code=201,
           json={},
         )
+      if email_campaign.current_status == "SCHEDULED":
+        self.mock_api.delete(
+          url=CampaignActivity.remote.get_url(
+            api_id=activity.api_id,
+            endpoint_suffix="/schedules",
+          ),
+          status_code=204,
+          json={},
+        )
       if send_preview:
         self.mock_api.post(
           url=CampaignActivity.remote.get_url(
@@ -473,7 +482,16 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     messages = do_update(self.existing_obj, future, send_preview=False)
     self.assertTrue(any("scheduled to be sent" in m for m in messages))
 
+    # Updating an already scheduled campaign unschedules before re-scheduling
+    future = timezone.now() + dt.timedelta(days=2)
+    self.existing_obj.current_status = "SCHEDULED"
+    self.existing_obj.save(update_fields=["current_status"])
+    messages = do_update(self.existing_obj, future, send_preview=False)
+    self.assertTrue(any("scheduled to be sent" in m for m in messages))
+
     # Unscheduling triggers "unscheduled remotely"
+    self.existing_obj.current_status = "DRAFT"
+    self.existing_obj.save(update_fields=["current_status"])
     messages = do_update(self.existing_obj, None, send_preview=False)
     self.assertTrue(any("unscheduled remotely" in m for m in messages))
 
