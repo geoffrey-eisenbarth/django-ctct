@@ -254,8 +254,8 @@ class Serializer[S: SerialModel](Manager[S]):
             field_types = "all"
           qs = value.all()
           data[field_name] = [qs.model.serializer.serialize(o, field_types) for o in qs]
-      elif isinstance(value, models.Model):
-        raise NotImplementedError  # pragma: no cover
+      elif isinstance(value, models.Model):  # pragma: no cover
+        raise NotImplementedError
       else:
         raise NotImplementedError  # pragma: no cover
 

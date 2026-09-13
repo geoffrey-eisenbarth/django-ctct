@@ -154,7 +154,7 @@ class Command(BaseCommand):
       # Split apart so we can save objs to db and get pks
       list_of_tuples = model.remote.all()
       objs, per_obj_list_of_related_objs = zip(*list_of_tuples)  # type: ignore[assignment]  # noqa: E501
-    except ValueError:
+    except ValueError:  # pragma: no cover
       # No values returned
       return
 
@@ -188,9 +188,9 @@ class Command(BaseCommand):
       assert isinstance(campaign.api_id, UUID)
       try:
         _, list_of_related_objs = EmailCampaign.remote.get(campaign.api_id)
-      except EmailCampaign.DoesNotExist:
+      except EmailCampaign.DoesNotExist:  # pragma: no cover
         # Available in bulk endpoint but not detail endpoint
-        continue  # pragma: no cover
+        continue
       else:
         # Set related object pk and store in db
         for related_model, objs in list_of_related_objs:
@@ -212,10 +212,10 @@ class Command(BaseCommand):
     for activity in tqdm(activities, disable=self.noinput):
       assert isinstance(activity.api_id, UUID)
       try:
-        obj, list_of_related_objs = CampaignActivity.remote.get(activity.api_id)  # noqa: E501
-      except CampaignActivity.DoesNotExist:
+        obj, list_of_related_objs = CampaignActivity.remote.get(activity.api_id)
+      except CampaignActivity.DoesNotExist:  # pragma: no cover
         # Came from EmailCampaign detail endpoint but doesn't exist elsewhere
-        continue  # pragma: no cover
+        continue
       else:
         obj.pk = activity.pk
         obj.campaign_id = activity.campaign_id
