@@ -8,10 +8,11 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Case, F, FloatField, Model, QuerySet, When
 from django.db.models.functions import Cast
-from django.forms import BaseFormSet, ModelForm
-from django.forms.models import BaseInlineFormSet
+from django.forms import ModelForm
+from django.forms.models import BaseInlineFormSet, BaseModelFormSet
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.formats import date_format
@@ -123,13 +124,14 @@ class ViewModelAdmin(admin.ModelAdmin[Model]):
 class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E]):
   """Facilitate remote saving and deleting."""
 
-  sync_admin: bool = getattr(settings, "CTCT_SYNC_ADMIN", False)
-
   # ChangeView
+  def get_sync_admin(self, request: HttpRequest) -> bool:
+    return getattr(settings, "CTCT_SYNC_ADMIN", False)
+
   @catch_api_errors
   def delete_model(self, request: HttpRequest, obj: E) -> None:
     obj.delete()
-    if self.sync_admin:
+    if self.get_sync_admin(request):
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
         raise NotImplementedError  # pragma: no cover
       else:
@@ -141,7 +143,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     request: HttpRequest,
     queryset: QuerySet[E],
   ) -> None:
-    if self.sync_admin:
+    if self.get_sync_admin(request):
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
         raise NotImplementedError  # pragma: no cover
       else:
@@ -153,7 +155,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     self,
     request: HttpRequest,
     form: ModelForm[E],
-    formsets: list[BaseFormSet[ModelForm[Model]]],
+    formsets: list[BaseModelFormSet[Model]],
     change: bool,
   ) -> None:
     """Default implementation with an added line for saving remotely.
@@ -175,10 +177,10 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     self,
     request: HttpRequest,
     form: ModelForm[E],
-    formsets: list[BaseFormSet[ModelForm[Model]]],
+    formsets: list[BaseModelFormSet[Model]],
     change: bool,
   ) -> None:
-    if self.sync_admin:
+    if self.get_sync_admin(request):
       # Remote save the primary object after related objects have been saved
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
         raise NotImplementedError  # pragma: no cover
@@ -625,18 +627,16 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     self,
     request: HttpRequest,
     form: ModelForm[EmailCampaign],
-    formsets: list[BaseFormSet[ModelForm[Model]]],
+    formsets: list[BaseModelFormSet[Model]],
     change: bool,
   ) -> None:
-    if self.sync_admin:
+    if self.get_sync_admin(request):
       if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
         raise NotImplementedError  # pragma: no cover
 
-      campaign = form.instance
-      activity = formsets[0][0].instance
-
       # Handle remote saving the EmailCampaign
       # NOTE: The only EmailCampaign field that can be updated is 'name'
+      campaign = form.instance
       campaign_created = not change
       campaign_updated = change and ("name" in form.changed_data)
       if campaign_created:
@@ -645,16 +645,26 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
         EmailCampaign.remote.update(campaign)
 
       # Handle remote saving the primary_email CampaignActivity
-      inline_changed = formsets[0][0].changed_data and not campaign_created
+      if activity_formset := next(
+        (fs for fs in formsets if fs.model is CampaignActivity),
+        None,
+      ):
+        activity_form = activity_formset[0]
+      else:  # pragma: no cover
+        raise ImproperlyConfigured(
+          _("CampaignActivityInline must be present in EmailCampaignAdmin.inlines")
+        )
+
+      inline_changed = activity_form.changed_data and not campaign_created
       schedule_changed = "scheduled_datetime" in form.changed_data
       preview_sent = ("send_preview" in form.changed_data) and campaign.send_preview
-      recipients_changed = "contact_lists" in formsets[0][0].changed_data
+      recipients_changed = "contact_lists" in activity_form.changed_data
 
       if inline_changed or schedule_changed or preview_sent or recipients_changed:
         # Refresh to get API id and remote save
-        assert isinstance(activity, CampaignActivity)
-        activity.refresh_from_db()
-        CampaignActivity.remote.update(activity)
+        assert isinstance(activity_form.instance, CampaignActivity)
+        activity_form.instance.refresh_from_db()
+        CampaignActivity.remote.update(activity_form.instance)
 
         # Inform the user
         self.ctct_message_user(request, form, formsets, change)
@@ -663,7 +673,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     self,
     request: HttpRequest,
     form: ModelForm[EmailCampaign],
-    formsets: list[BaseFormSet[ModelForm[Model]]],
+    formsets: list[BaseModelFormSet[Model]],
     change: bool,
   ) -> None:
     """Inform the user of API actions."""
@@ -701,7 +711,7 @@ class CampaignSummaryAdmin(ViewModelAdmin):
   """Admin functionality for CTCT EmailCampaign Summary Report."""
 
   # ListView
-  search_fields = ("name",)
+  search_fields = ("campaign__name",)
   list_display = (
     "campaign",
     "open_rate",
