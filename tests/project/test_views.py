@@ -5,6 +5,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import gettext as _
 
+from django_ctct.models import Token
+
 AUTH_URL: str = reverse("ctct:auth")
 
 
@@ -18,6 +20,13 @@ AUTH_URL: str = reverse("ctct:auth")
 )
 class AuthViewTest(TestCase):
   """Tests for the OAuth2 authentication view (django_ctct.views.auth)."""
+
+  def test_token_get_auth_url(self) -> None:
+    """Token.remote.get_auth_url() builds the full authorization URL."""
+    request = HttpRequest()
+    url = Token.remote.get_auth_url(request)
+    self.assertIn("https://authz.constantcontact.com/oauth2/default/v1/authorize?", url)
+    self.assertIn("client_id=TEST_KEY", url)
 
   @patch("django_ctct.models.Token.remote.get_auth_url")
   def test_auth_initial_request_redirects(

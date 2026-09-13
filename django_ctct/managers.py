@@ -52,13 +52,12 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
 
   def connect(self) -> None:
     if not hasattr(self, "session"):
-      from django_ctct.models import Token
-
-      token = Token.remote.get()
       self.session = requests.Session()
-      self.session.headers.update(
-        {"Authorization": f"{token.token_type} {token.access_token}"}
-      )
+
+    from django_ctct.models import Token
+
+    token = Token.objects.get_valid()
+    self.session.headers["Authorization"] = f"{token.token_type} {token.access_token}"
 
   @sleep_and_retry
   @limits(calls=API_LIMIT_CALLS, period=API_LIMIT_PERIOD)
@@ -69,6 +68,24 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
   def _pre_api_call(self) -> None:
     self.connect()
     self.check_api_limit()
+
+  def request(
+    self,
+    method: str,
+    url: str,
+    **kwargs: Any,
+  ) -> Response:
+    """Make an API request with rate limiting and automatic 401 retry."""
+    self._pre_api_call()
+    response = self.session.request(method, url, **kwargs)
+    if response.status_code == 401:
+      from django_ctct.models import Token
+
+      token = Token.objects.get_valid(force_refresh=True)
+      self.session.headers["Authorization"] = f"{token.token_type} {token.access_token}"
+      self.check_api_limit()
+      response = self.session.request(method, url, **kwargs)
+    return response
 
   def get_url(
     self,
@@ -109,6 +126,39 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
       raise HTTPError(_(f"[{response.status_code}] {error_message}"), response=response)
 
     return data
+
+
+class TokenManager(Manager["Token"]):
+  """Local manager for Token with in-memory caching and automatic refresh."""
+
+  _cached_token: Token | None = None
+
+  def get_valid(self, force_refresh: bool = False) -> Token:
+    """Fetches active Token, refreshing remotely if expired or on 401."""
+    if not force_refresh and self._cached_token is not None:
+      if not self._cached_token.is_expired:
+        return self._cached_token
+
+    token = self.first()
+    if not token:
+      self._cached_token = None
+      raise ValueError(
+        _(
+          "No tokens in the database yet. "
+          f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
+        )
+      )
+
+    if force_refresh or token.is_expired:
+      token = self.model.remote.refresh(token)
+    else:
+      try:
+        token.decode()
+      except ExpiredSignatureError:
+        token = self.model.remote.refresh(token)
+
+    self._cached_token = token
+    return token
 
 
 class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
@@ -153,30 +203,11 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
     )
     data = self.raise_or_json(response)
     token = self.model.objects.create(**data)
+    if isinstance(self.model.objects, TokenManager):
+      self.model.objects._cached_token = token
     return token
 
-  def get(self, **kwargs: Any) -> Token:
-    """Fetches most recent token, refreshing if necessary."""
-    if kwargs:
-      raise TypeError("TokenRemoteManager.get() takes no keyword arguments.")
-
-    token = self.model.objects.first()
-    if not token:
-      raise ValueError(
-        _(
-          "No tokens in the database yet. "
-          f"Go to {reverse('ctct:auth')} and sign into ConstantContact."
-        )
-      )
-
-    try:
-      token.decode()
-    except ExpiredSignatureError:
-      token = self.update(token)
-
-    return token
-
-  def update(self, token: Token) -> Token:  # type: ignore[override]
+  def refresh(self, token: Token) -> Token:
     """Obtain a new Token from CTCT using the refresh code."""
 
     self.connect()
@@ -188,8 +219,10 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
       },
     )
     data = self.raise_or_json(response)
-    token = self.model.objects.create(**data)
-    return token
+    new_token = self.model.objects.create(**data)
+    if isinstance(self.model.objects, TokenManager):
+      self.model.objects._cached_token = new_token
+    return new_token
 
 
 class Serializer[S: SerialModel](Manager[S]):
@@ -416,8 +449,8 @@ class RemoteManager[E: CTCTEndpointModel](
     if not obj.pk:
       raise ValueError("Must create object locally first.")
 
-    self._pre_api_call()
-    response = self.session.post(
+    response = self.request(
+      "post",
       url=self.get_url(),
       json=self.serialize(obj),
     )
@@ -445,9 +478,8 @@ class RemoteManager[E: CTCTEndpointModel](
 
     """
 
-    self._pre_api_call()
-
-    response = self.session.get(
+    response = self.request(
+      "get",
       url=self.get_url(api_id),
       params=self.model.API_GET_QUERIES,
     )
@@ -476,9 +508,8 @@ class RemoteManager[E: CTCTEndpointModel](
 
     paginated = True
     while paginated:
-      self._pre_api_call()
-
-      response = self.session.get(
+      response = self.request(
+        "get",
         url=self.get_url(endpoint=endpoint),
         params=self.model.API_GET_QUERIES,
       )
@@ -511,8 +542,8 @@ class RemoteManager[E: CTCTEndpointModel](
     elif obj.api_id is None:
       raise ValueError("Must create object remotely first.")
 
-    self._pre_api_call()
-    response = self.session.put(
+    response = self.request(
+      "put",
       url=self.get_url(obj.api_id),
       json=self.serialize(obj),
     )
@@ -545,8 +576,7 @@ class RemoteManager[E: CTCTEndpointModel](
     """
 
     url = self.get_url(obj.api_id, endpoint_suffix=endpoint_suffix)
-    self._pre_api_call()
-    response = self.session.delete(url)
+    response = self.request("delete", url)
 
     if response.status_code != 404:
       # Allow 404
@@ -571,8 +601,8 @@ class RemoteManager[E: CTCTEndpointModel](
 
     # Remote delete in batches
     for i in range(0, len(api_ids), self.model.API_ENDPOINT_BULK_LIMIT):
-      self._pre_api_call()
-      response = self.session.post(
+      response = self.request(
+        "post",
         url=self.get_url(endpoint=self.model.API_ENDPOINT_BULK_DELETE),
         json={api_id_label: api_ids[i : i + self.model.API_ENDPOINT_BULK_LIMIT]},
       )
@@ -611,8 +641,8 @@ class ContactListRemoteManager(RemoteManager["ContactList"]):
       raise ValueError(_("Must pass a QuerySet of Contacts."))
 
     for i in range(0, len(contact_ids), step_size):
-      self._pre_api_call()
-      response = self.session.post(
+      response = self.request(
+        "post",
         url=self.get_url(endpoint="/activities/add_list_memberships"),
         json={
           "source": {"contact_ids": contact_ids[i : i + step_size]},
@@ -666,8 +696,8 @@ class ContactRemoteManager(RemoteManager["Contact"]):
     data = self.serialize(obj)
     data["email_address"] = data.pop("email_address")["address"]
 
-    self._pre_api_call()
-    response = self.session.post(
+    response = self.request(
+      "post",
       url=self.get_url(endpoint_suffix="/sign_up_form"),
       json=data,
     )
@@ -728,8 +758,8 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
       activity = CampaignActivity()
 
     # Create EmailCampaign and CampaignActivity remotely
-    self._pre_api_call()
-    response = self.session.post(
+    response = self.request(
+      "post",
       url=self.get_url(),
       json={
         "name": obj.name,
@@ -781,8 +811,8 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
     elif obj.api_id is None:
       raise ValueError("Must create object remotely first.")
 
-    self._pre_api_call()
-    response = self.session.patch(
+    response = self.request(
+      "patch",
       url=self.get_url(obj.api_id),
       json=self.serialize(obj),
     )
@@ -865,8 +895,8 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
       else:
         message = getattr(settings, "CTCT_PREVIEW_MESSAGE", "")
 
-    self._pre_api_call()
-    response = self.session.post(
+    response = self.request(
+      "post",
       url=self.get_url(obj.api_id, endpoint_suffix="/tests"),
       json={
         "email_addresses": recipients,
@@ -895,8 +925,8 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
       raise ValueError(_("Must specify `contact_lists`."))
 
     # Schedule the CampaignActivity
-    self._pre_api_call()
-    response = self.session.post(
+    response = self.request(
+      "post",
       url=self.get_url(obj.api_id, endpoint_suffix="/schedules"),
       json={"scheduled_date": obj.campaign.scheduled_datetime.isoformat()},
     )

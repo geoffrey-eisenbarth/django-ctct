@@ -128,6 +128,14 @@ class TestImportCommand(TestCase):
       serializer = partial(model.serializer.serialize, field_types="all")
       self.data[model] = list(map(serializer, objs))
 
+      # Ensure opt_out_date and last_sent_date deserialization branches are exercised
+      if model is Contact:
+        for datum in self.data[Contact]:
+          datum["email_address"]["opt_out_date"] = "2026-01-01T12:00:00Z"
+      elif model is EmailCampaign:
+        for datum in self.data[EmailCampaign]:
+          datum["last_sent_date"] = "2026-01-01T12:00:00.000Z"
+
     # Delete objects
     for model in self.models:
       model.objects.all().delete()
@@ -255,3 +263,6 @@ class TestImportCommand(TestCase):
             related_model.objects.count(),
             self.num_objs[Contact] * NUM_RELATED_OBJS[Contact],
           )
+
+    # Test stats_only flag
+    call_command("import_ctct", "--noinput", "--stats_only")

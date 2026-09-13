@@ -55,6 +55,12 @@ class TokenFactory(DjangoModelFactory[Token]):
   refresh_token = factory.Faker("pystr", max_chars=50)
   scope = Token.API_SCOPE
 
+  @classmethod
+  def _create(cls, model_class: type[Token], *args: Any, **kwargs: Any) -> Token:
+    token = super()._create(model_class, *args, **kwargs)
+    Token.objects._cached_token = None
+    return token
+
 
 class CTCTModelFactory[M: Model](DjangoModelFactory[M]):
   api_id = factory.Faker("uuid4")

@@ -7,15 +7,24 @@ from django.test import TestCase
 from jwt import ExpiredSignatureError
 from requests.exceptions import HTTPError
 
-from django_ctct.models import Contact, ContactList, JsonDict, Token
+from django_ctct.models import (
+  CampaignActivity,
+  CampaignSummary,
+  Contact,
+  ContactList,
+  EmailCampaign,
+  JsonDict,
+  Token,
+)
 from tests.factories import TokenFactory, get_factory
 from tests.project.test_models import RequestsMockMixin
 
 
 class TokenRemoteManagerTest(TestCase):
-  """Tests for TokenRemoteManager's full auth lifecycle (create/get/update)."""
+  """Tests for TokenRemoteManager and TokenManager auth lifecycle."""
 
   def setUp(self) -> None:
+    Token.objects._cached_token = None
     self.mock_api = requests_mock.Mocker()
     self.mock_api.start()
     self.addCleanup(self.mock_api.stop)
@@ -42,10 +51,33 @@ class TokenRemoteManagerTest(TestCase):
 
     self.assertEqual(Token.objects.count(), 1)
     self.assertEqual(token.access_token, "new-access-token")
+    self.assertIn("Token (Expires:", str(token))
+
+  @patch("jwt.PyJWKClient")
+  @patch("jwt.decode")
+  def test_token_decode(self, mock_jwt_decode: MagicMock, mock_jwk: MagicMock) -> None:
+    token = TokenFactory.create()
+    mock_jwt_decode.return_value = {"aud": "test"}
+    data = token.decode()
+    self.assertEqual(data, {"aud": "test"})
+
+  def test_refresh(self) -> None:
+    """Token.remote.refresh() exchanges a refresh token for a new Token."""
+    token = TokenFactory.create(refresh_token="old-refresh-token")
+
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=200,
+      json=self.get_token_response(access_token="refreshed-token"),
+    )
+
+    new_token = Token.remote.refresh(token)
+    self.assertEqual(Token.objects.count(), 2)
+    self.assertEqual(new_token.access_token, "refreshed-token")
 
   @patch("django_ctct.models.Token.decode")
-  def test_get_refreshes_expired_token(self, token_decode: MagicMock) -> None:
-    """Token.remote.get() should refresh an expired Token automatically."""
+  def test_get_valid_refreshes_expired(self, token_decode: MagicMock) -> None:
+    """Token.objects.get_valid() should refresh an expired Token automatically."""
 
     TokenFactory.create()
     token_decode.side_effect = ExpiredSignatureError
@@ -56,19 +88,54 @@ class TokenRemoteManagerTest(TestCase):
       json=self.get_token_response(),
     )
 
-    token = Token.remote.get()
+    token = Token.objects.get_valid()
 
     self.assertEqual(Token.objects.count(), 2)
     self.assertEqual(token.access_token, "new-access-token")
 
-  def test_get_raises_without_existing_token(self) -> None:
-    with self.assertRaises(ValueError):
-      Token.remote.get()
+  @patch("django_ctct.models.Token.decode")
+  def test_get_valid_uses_cache(self, token_decode: MagicMock) -> None:
+    """Token.objects.get_valid() uses cached token when valid."""
+    token_decode.return_value = True
+    token1 = TokenFactory.create()
 
-  def test_get_rejects_kwargs(self) -> None:
+    fetched1 = Token.objects.get_valid()
+    self.assertEqual(fetched1.pk, token1.pk)
+
+    # Second call returns the cached instance
+    fetched2 = Token.objects.get_valid()
+    self.assertIs(fetched1, fetched2)
+
+  @patch("django_ctct.models.Token.decode")
+  def test_401_retry_refreshes_token(self, token_decode: MagicMock) -> None:
+    """401 responses trigger token refresh and retry."""
+    token_decode.return_value = True
     TokenFactory.create()
-    with self.assertRaises(TypeError):
-      Token.remote.get(foo="bar")  # type: ignore[misc]
+
+    # Initial call gives 401, refresh gives new token, retry succeeds with 200
+    test_url = "https://api.cc.email/v3/account/summary"
+    self.mock_api.register_uri(
+      "GET",
+      test_url,
+      [
+        {"status_code": 401, "json": {"error_message": "Unauthorized"}},
+        {"status_code": 200, "json": {"data": "ok"}},
+      ],
+    )
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=200,
+      json=self.get_token_response(access_token="refreshed-token"),
+    )
+
+    response = Contact.remote.request("get", test_url)
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.json(), {"data": "ok"})
+    self.assertEqual(Token.objects.count(), 2)
+
+  def test_get_valid_raises_without_existing_token(self) -> None:
+    with self.assertRaises(ValueError):
+      Token.objects.get_valid()
 
   def test_raise_or_json_handles_404_and_http_errors(self) -> None:
     """Covers ConnectionManagerMixin.raise_or_json()'s error branches."""
@@ -203,3 +270,126 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
 
     with self.assertRaises(HTTPError):
       self.model.remote.create(obj)  # type: ignore[misc]
+
+  def test_update_or_create_unexpected_response_raises(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    """Extra unexpected fields returned from sign_up_form should raise ValueError."""
+
+    token_decode.return_value = True
+
+    obj = self.factory.create(api_id=None)
+    self.mock_api.post(
+      url=self.model.remote.get_url(endpoint_suffix="/sign_up_form"),
+      status_code=200,
+      json={"action": "created", "contact_id": str(uuid4()), "unexpected_field": "foo"},
+    )
+    with self.assertRaises(ValueError):
+      self.model.remote.update_or_create(obj)
+
+
+@patch("django_ctct.models.Token.decode")
+class EmailCampaignAndActivityManagerTests(TestCase):
+  """Tests for EmailCampaign and CampaignActivity manager edge cases."""
+
+  def setUp(self) -> None:
+    Token.objects._cached_token = None
+    self.mock_api = requests_mock.Mocker()
+    self.mock_api.start()
+    self.addCleanup(self.mock_api.stop)
+    TokenFactory.create()
+
+  def test_email_campaign_create_with_existing_activity(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+
+    campaign = get_factory(EmailCampaign).create()
+    primary_activity = campaign.campaign_activities.get(role="primary_email")
+    api_id = uuid4()
+    self.mock_api.post(
+      url=EmailCampaign.remote.get_url(),
+      status_code=201,
+      json={
+        "campaign_id": str(campaign.api_id or api_id),
+        "name": campaign.name,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "campaign_activities": [
+          {
+            "campaign_activity_id": str(primary_activity.api_id or api_id),
+            "role": "primary_email",
+          }
+        ],
+      },
+    )
+    res = EmailCampaign.remote.create(campaign)  # type: ignore[misc]
+    self.assertEqual(res.pk, campaign.pk)
+
+  def test_email_campaign_update_requires_api_id(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    campaign = get_factory(EmailCampaign).create(api_id=None)
+    with self.assertRaises(ValueError):
+      EmailCampaign.remote.update(campaign)
+
+  def test_campaign_activity_create_raises_not_implemented(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    activity = get_factory(CampaignActivity).create()
+    with self.assertRaises(NotImplementedError):
+      CampaignActivity.remote.create(activity)
+
+  def test_campaign_activity_send_preview_with_callables(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    activity = get_factory(CampaignActivity).create()
+
+    self.mock_api.post(
+      url=CampaignActivity.remote.get_url(activity.api_id, endpoint_suffix="/tests"),
+      status_code=200,
+      json={},
+    )
+    with self.settings(
+      CTCT_PREVIEW_RECIPIENTS_CALLABLE="django_ctct.models.campaign_activity__from_email__default",
+      CTCT_PREVIEW_MESSAGE_CALLABLE="django_ctct.models.campaign_activity__from_name__default",
+    ):
+      with (
+        patch(
+          "django_ctct.models.campaign_activity__from_email__default",
+          return_value=["custom@example.com"],
+        ),
+        patch(
+          "django_ctct.models.campaign_activity__from_name__default",
+          return_value="Custom Message",
+        ),
+      ):
+        CampaignActivity.remote.send_preview(activity)
+
+    self.assertEqual(self.mock_api.call_count, 1)
+
+  def test_campaign_summary_serialize(self, token_decode: MagicMock) -> None:
+    summary = get_factory(CampaignSummary).create()
+    data = CampaignSummary.remote.serialize(summary, field_types="all")
+    self.assertIn("unique_counts", data)
+
+  def test_remote_manager_get_404_raises_does_not_exist(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    fake_id = uuid4()
+    self.mock_api.get(
+      url=Contact.remote.get_url(fake_id),
+      status_code=404,
+    )
+    with self.assertRaises(Contact.DoesNotExist):
+      Contact.remote.get(fake_id)

@@ -10,7 +10,7 @@ from typing import (
 
 import jwt
 from django.conf import settings
-from django.core.validators import validate_email
+from django.core.validators import MaxLengthValidator, validate_email
 from django.db import models
 from django.db.models import Model
 from django.db.models.base import Model as BaseModel
@@ -26,6 +26,7 @@ from django_ctct.managers import (
   EmailCampaignRemoteManager,
   RemoteManager,
   Serializer,
+  TokenManager,
   TokenRemoteManager,
 )
 from django_ctct.utils import to_dt
@@ -106,7 +107,7 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
   TOKEN_TYPES = ((TOKEN_TYPE, TOKEN_TYPE),)
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  objects: ClassVar[TokenManager] = TokenManager()
   remote: ClassVar[TokenRemoteManager] = TokenRemoteManager()
 
   access_token = models.TextField(
@@ -134,6 +135,10 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
   @property
   def expires_at(self) -> dt.datetime:
     return self.created_at + dt.timedelta(seconds=self.expires_in)
+
+  @property
+  def is_expired(self) -> bool:
+    return timezone.now() >= (self.expires_at - dt.timedelta(seconds=60))
 
   class Meta:
     ordering = ("-created_at",)
@@ -1074,9 +1079,9 @@ class CampaignActivity(CTCTEndpointModel):
       "the subject line in their email client"
     ),
   )
-  html_content = models.CharField(
-    max_length=API_MAX_LENGTH["html_content"],
+  html_content = models.TextField(
     verbose_name=_("HTML Content"),
+    validators=[MaxLengthValidator(API_MAX_LENGTH["html_content"])],
     help_text=_("The HTML content for the email campaign activity"),
   )
   contact_lists = models.ManyToManyField(

@@ -270,10 +270,9 @@ class Command(BaseCommand):
     self.noinput = kwargs["noinput"]
     self.stats_only = kwargs["stats_only"]
 
-    if self.stats_only:
-      self.CTCT_MODELS = [CampaignSummary]
+    ctct_models = [CampaignSummary] if self.stats_only else self.CTCT_MODELS
 
-    for model in self.CTCT_MODELS:
+    for model in ctct_models:
       if model is CampaignActivity:
         note = "Note: This will result in 1 API request per EmailCampaign! "
       else:

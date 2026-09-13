@@ -584,6 +584,13 @@ class ViewModelAdminTest(TestCase):
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.context["cl"].result_count, 2)
 
+    if self.model is ContactNote:
+      note = ContactNote.objects.first()
+      assert note is not None
+      author_id = note.author_id or self.user.id
+      filter_response = client.get(admin_changelist_path, {"author": str(author_id)})
+      self.assertEqual(filter_response.status_code, 200)
+
     # Superusers are still allowed to delete
     model_admin = admin.site._registry[self.model]
     self.assertTrue(model_admin.has_delete_permission(response.wsgi_request))
