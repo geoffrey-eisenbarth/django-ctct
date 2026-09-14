@@ -161,7 +161,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
           ]
 
         for i, related_obj in enumerate(related_objs):
-          data = inline_admin.model.serializer.serialize(related_obj)
+          data = inline_admin.model.serializer.serialize(related_obj, field_types="all")
           if inline_admin.model is CampaignActivity:
             # Factory can't specify ManyToManyField during build()
             data["contact_lists"] = [cl.pk for cl in self.existing_lists]
