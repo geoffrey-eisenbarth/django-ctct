@@ -58,12 +58,12 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-  "E",   # pycodestyle errors
-  "W",   # pycodestyle warnings
-  "F",   # pyflakes (unused imports, undefined names, etc.)
-  "I",   # isort (automatically sorts and organizes imports)
-  "UP",  # pyupgrade (modernizes Python syntax)
-  # "RUF100",  # flags unused noqa comments
+  "E",        # pycodestyle errors
+  "W",        # pycodestyle warnings
+  "F",        # pyflakes (unused imports, undefined names, etc.)
+  "I",        # isort (automatically sorts and organizes imports)
+  "UP",       # pyupgrade (modernizes Python syntax)
+  "RUF100",   # flags unused noqa comments
 ]
 ignore = [
   "E111",  # Indentation is not a multiple of four

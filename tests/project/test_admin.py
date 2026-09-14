@@ -127,7 +127,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
               value = initial_value
 
             inline_data[f"{formset.prefix}-{i}-{field_name}"] = value
-            inline_data[f"initial-{formset.prefix}-{i}-{field_name}"] = initial_value  # noqa: E501
+            inline_data[f"initial-{formset.prefix}-{i}-{field_name}"] = initial_value
 
         for i, form in enumerate(formset.initial_forms):
           inline_data[f"{formset.prefix}-{i}-id"] = form.instance.pk
@@ -141,7 +141,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
             elif field.default is not models.NOT_PROVIDED:
               # Include related object defaults
               default = "" if field.default is None else field.get_default()
-              inline_data[f"initial-{formset.prefix}-{i}-{field.name}"] = default  # noqa: E501
+              inline_data[f"initial-{formset.prefix}-{i}-{field.name}"] = default
 
       else:
         # Include new data for related object

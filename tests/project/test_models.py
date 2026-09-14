@@ -187,7 +187,7 @@ class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
       # Set up the mock request for updating the CampaignActivity
       campaign_activity = self.existing_obj.campaign_activities.get(
         role="primary_email"
-      )  # noqa: E501
+      )
       self.mock_api.put(
         url=CampaignActivity.remote.get_url(api_id=campaign_activity.api_id),
         status_code=200,

@@ -271,7 +271,7 @@ class ContactList(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
-  remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()  # noqa: E501
+  remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()
 
   # API editable fields
   name = models.CharField(
@@ -472,7 +472,7 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
-  remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()  # noqa: E501
+  remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()
 
   SALUTATIONS = (
     ("Mr.", "Mr."),
@@ -900,7 +900,7 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
-  remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()  # noqa: E501
+  remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()
 
   STATUSES = (
     ("NONE", "Processing"),
@@ -949,7 +949,7 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     return self.name
 
   @classmethod
-  def clean_remote_scheduled_datetime(cls, data: JsonDict) -> dt.datetime | None:  # noqa: E501
+  def clean_remote_scheduled_datetime(cls, data: JsonDict) -> dt.datetime | None:
     if last_sent_date := data.get("last_sent_date", None):
       # Not sure why this ts_format is different
       assert isinstance(last_sent_date, str)
@@ -1024,7 +1024,7 @@ class CampaignActivity(CTCTEndpointModel):
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
-  remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()  # noqa: E501
+  remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()
 
   ROLES = (
     ("primary_email", "Primary Email"),
@@ -1208,7 +1208,7 @@ class CampaignSummary(CTCTEndpointModel):
 
   # Must explicitly specify both
   objects: ClassVar[models.Manager[Self]] = models.Manager()
-  remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()  # noqa: E501
+  remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()
 
   campaign = models.OneToOneField(
     EmailCampaign,

@@ -153,7 +153,7 @@ class Command(BaseCommand):
     try:
       # Split apart so we can save objs to db and get pks
       list_of_tuples = model.remote.all()
-      objs, per_obj_list_of_related_objs = zip(*list_of_tuples)  # type: ignore[assignment]  # noqa: E501
+      objs, per_obj_list_of_related_objs = zip(*list_of_tuples)  # type: ignore[assignment]
     except ValueError:  # pragma: no cover
       # No values returned
       return
