@@ -63,7 +63,14 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
   @sleep_and_retry
   @limits(calls=API_LIMIT_CALLS, period=API_LIMIT_PERIOD)
   def check_api_limit(self) -> None:
-    """Honor the API's rate limit."""
+    """Honor the API's rate limit.
+
+    Notes
+    -----
+    The rate limiter's state is shared by all managers, but it is local to the
+    current process; multi-process deployments may still exceed CTCT's limit.
+
+    """
     pass
 
   def _pre_api_call(self) -> None:
