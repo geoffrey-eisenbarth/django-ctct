@@ -122,7 +122,6 @@ class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
     if isinstance(obj, EmailCampaign):
       # Set up the mock request for updating the CampaignActivity
       # (may or may not be used depending on the situation)
-      # TODO: GH #13
       api_response = api_response["campaign_activities"][0]
       self.mock_api.put(
         url=CampaignActivity.remote.get_url(
@@ -179,21 +178,6 @@ class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
       json=api_response,
     )
 
-    update_related = False  # TODO: GH #13
-    if isinstance(self.existing_obj, EmailCampaign) and update_related:
-      # Set up the mock request for updating the CampaignActivity
-      campaign_activity = self.existing_obj.campaign_activities.get(
-        role="primary_email"
-      )
-      self.mock_api.put(
-        url=CampaignActivity.remote.get_url(api_id=campaign_activity.api_id),
-        status_code=200,
-        json={},
-      )
-      num_requests = 2
-    else:
-      num_requests = 1
-
     # Save updated existing_obj
     obj = self.update_obj(self.existing_obj)
 
@@ -202,7 +186,7 @@ class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
       assert getattr(obj, field) == value
 
     # Verify the number of requests that were made
-    assert self.mock_api.call_count == num_requests
+    assert self.mock_api.call_count == 1
 
   @patch("django_ctct.models.Token.decode")
   def test_delete(self, token_decode: MagicMock) -> None:

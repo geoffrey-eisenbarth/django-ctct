@@ -120,7 +120,6 @@ class ModelAdminTest(TestCRUD[E], TestCase):
               value = [o.pk for o in initial_value]
 
             if update_related:
-              # TODO: GH #13
               raise NotImplementedError
             else:
               value = initial_value
