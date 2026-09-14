@@ -156,15 +156,9 @@ class TestImportCommand(TestCase):
     model: type[E],
   ) -> dict[str, list[JsonDict]]:
     data = {
-      # '_links': {},  # TODO: GH #3
       # This key is e.g. 'lists' or 'contacts', but we don't call it directly
-      "data": self.data[model],
+      "<PLACEHOLDER>": self.data[model],
     }
-    # TODO: GH #3
-    # NOTE: Infinite loop if we're calling get_api_url()
-    # if 'cursor' not in (url := self.get_api_url()):
-    #   next_endpoint = url.split('v3')[-1] + '&cursor=cursor'
-    #   data['_links'] = {'next': {'href': next_endpoint}}
     return data
 
   @patch("django_ctct.models.Token.decode")
@@ -204,11 +198,13 @@ class TestImportCommand(TestCase):
             json=datum,
           )
       elif model is ContactList:
-        # Split the response across two pages to test pagination
+        # Split the response across two pages to test pagination (with a duplicate item)
         page_size = self.per_request[ContactList]
         page_1_data = self.data[ContactList][:page_size]
-        page_2_data = self.data[ContactList][page_size:]
-        next_endpoint = f"{ContactList.API_ENDPOINT}?cursor=page2"
+        page_2_data = self.data[ContactList][page_size:] + [self.data[ContactList][0]]
+        next_endpoint = (
+          f"{ContactList.API_VERSION}{ContactList.API_ENDPOINT}?cursor=page2"
+        )
 
         self.mock_api.get(
           url=self.get_api_url(model),
@@ -219,7 +215,7 @@ class TestImportCommand(TestCase):
           },
         )
         self.mock_api.get(
-          url=f"{model.API_URL}{model.API_VERSION}{next_endpoint}",
+          url=f"{model.API_URL}{next_endpoint}",
           status_code=200,
           json={"data": page_2_data},
         )
