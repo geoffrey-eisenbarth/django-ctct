@@ -22,6 +22,7 @@ from ratelimit import limits, sleep_and_retry
 from requests.exceptions import HTTPError
 from requests.models import Response
 
+from django_ctct.conf import get_setting
 from django_ctct.utils import get_related_fields
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -76,6 +77,7 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
     **kwargs: Any,
   ) -> Response:
     """Make an API request with rate limiting and automatic 401 retry."""
+    kwargs.setdefault("timeout", get_setting("CTCT_API_TIMEOUT"))
     self._pre_api_call()
     response = self.session.request(method, url, **kwargs)
     if response.status_code == 401:
@@ -200,6 +202,7 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
         "redirect_uri": settings.CTCT_REDIRECT_URI,
         "grant_type": "authorization_code",
       },
+      timeout=get_setting("CTCT_API_TIMEOUT"),
     )
     data = self.raise_or_json(response)
     token = self.model.objects.create(**data)
@@ -217,6 +220,7 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
         "refresh_token": token.refresh_token,
         "grant_type": "refresh_token",
       },
+      timeout=get_setting("CTCT_API_TIMEOUT"),
     )
     data = self.raise_or_json(response)
     new_token = self.model.objects.create(**data)
@@ -879,21 +883,16 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
     """Sends a preview of the EmailCampaign."""
 
     if recipients is None:
-      if getter := getattr(settings, "CTCT_PREVIEW_RECIPIENTS_CALLABLE", None):
+      if getter := get_setting("CTCT_PREVIEW_RECIPIENTS_CALLABLE"):
         recipients = import_string(getter)(obj.campaign)
       else:
-        recipients = [
-          email
-          for (name, email) in getattr(
-            settings, "CTCT_PREVIEW_RECIPIENTS", settings.MANAGERS
-          )
-        ]
+        recipients = [email for (name, email) in get_setting("CTCT_PREVIEW_RECIPIENTS")]
 
     if message is None:
-      if getter := getattr(settings, "CTCT_PREVIEW_MESSAGE_CALLABLE", None):
+      if getter := get_setting("CTCT_PREVIEW_MESSAGE_CALLABLE"):
         message = import_string(getter)(obj.campaign)
       else:
-        message = getattr(settings, "CTCT_PREVIEW_MESSAGE", "")
+        message = get_setting("CTCT_PREVIEW_MESSAGE")
 
     response = self.request(
       "post",

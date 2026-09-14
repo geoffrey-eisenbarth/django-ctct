@@ -18,6 +18,7 @@ from django.db.models.fields import NOT_PROVIDED
 from django.utils import formats, timezone
 from django.utils.translation import gettext_lazy as _
 
+from django_ctct.conf import get_setting
 from django_ctct.managers import (
   CampaignActivityRemoteManager,
   CampaignSummaryRemoteManager,
@@ -967,7 +968,7 @@ def campaign_activity__from_email__default() -> str:
 
 
 def campaign_activity__reply_to_email__default() -> str:
-  return getattr(settings, "CTCT_REPLY_TO_EMAIL", settings.CTCT_FROM_EMAIL)
+  return get_setting("CTCT_REPLY_TO_EMAIL")
 
 
 class CampaignActivity(CTCTEndpointModel):
@@ -1123,7 +1124,7 @@ class CampaignActivity(CTCTEndpointModel):
     Constant Contact user account.
 
     """
-    return getattr(settings, "CTCT_PHYSICAL_ADDRESS", None)
+    return get_setting("CTCT_PHYSICAL_ADDRESS")
 
   class Meta:
     verbose_name = _("Email Campaign Activity")

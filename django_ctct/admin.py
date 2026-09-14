@@ -20,6 +20,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext as _
 from requests.exceptions import HTTPError
 
+from django_ctct.conf import get_setting
 from django_ctct.models import (
   CampaignActivity,
   CampaignSummary,
@@ -48,7 +49,7 @@ def catch_api_errors[S: admin.ModelAdmin[Any], **P](
     try:
       return func(self, *args, **kwargs)
     except HTTPError as e:
-      if getattr(settings, "CTCT_RAISE_FOR_API", False):
+      if get_setting("CTCT_RAISE_FOR_API"):
         raise e
       else:
         kwarg_request = kwargs.get("request")
@@ -126,13 +127,13 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
 
   # ChangeView
   def get_sync_admin(self, request: HttpRequest) -> bool:
-    return getattr(settings, "CTCT_SYNC_ADMIN", False)
+    return get_setting("CTCT_SYNC_ADMIN")
 
   @catch_api_errors
   def delete_model(self, request: HttpRequest, obj: E) -> None:
     obj.delete()
     if self.get_sync_admin(request):
-      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+      if get_setting("CTCT_ENQUEUE_DEFAULT"):
         raise NotImplementedError  # pragma: no cover
       else:
         self.model.remote.delete(obj)
@@ -144,7 +145,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
     queryset: QuerySet[E],
   ) -> None:
     if self.get_sync_admin(request):
-      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+      if get_setting("CTCT_ENQUEUE_DEFAULT"):
         raise NotImplementedError  # pragma: no cover
       else:
         queryset.model.remote.bulk_delete(queryset)
@@ -182,7 +183,7 @@ class RemoteModelAdmin[E: CTCTEndpointModel](RemoteSyncMixin, admin.ModelAdmin[E
   ) -> None:
     if self.get_sync_admin(request):
       # Remote save the primary object after related objects have been saved
-      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+      if get_setting("CTCT_ENQUEUE_DEFAULT"):
         raise NotImplementedError  # pragma: no cover
       elif change:
         self.model.remote.update(form.instance)
@@ -654,7 +655,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
     change: bool,
   ) -> None:
     if self.get_sync_admin(request):
-      if getattr(settings, "CTCT_ENQUEUE_DEFAULT", False):
+      if get_setting("CTCT_ENQUEUE_DEFAULT"):
         raise NotImplementedError  # pragma: no cover
 
       # Handle remote saving the EmailCampaign

@@ -1,23 +1,33 @@
+from typing import Any
+
 from django.apps import AppConfig
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.core import checks
 from django.utils.translation import gettext_lazy as _
+
+from django_ctct.conf import REQUIRED_SETTINGS
+
+
+@checks.register(checks.Tags.compatibility)
+def check_required_settings(
+  app_configs: Any = None,
+  **kwargs: Any,
+) -> list[checks.Error]:
+  """Validate that necessary settings have been defined."""
+  errors = []
+  for name in REQUIRED_SETTINGS:
+    if not hasattr(settings, name):
+      errors.append(
+        checks.Error(
+          f"{name} must be defined in settings.",
+          hint=f"Add {name} to your project's settings.py.",
+          id="django_ctct.E001",
+        )
+      )
+  return errors
 
 
 class CTCTConfig(AppConfig):
   name = "django_ctct"
   verbose_name = _("Constant Contact")
-  required_settings = [
-    "CTCT_PUBLIC_KEY",
-    "CTCT_SECRET_KEY",
-    "CTCT_REDIRECT_URI",
-    "CTCT_FROM_NAME",
-    "CTCT_FROM_EMAIL",
-  ]
-
-  def ready(self) -> None:
-    """Validate that necessary settings have been defined."""
-    for value in self.required_settings:
-      if not hasattr(settings, value):
-        message = _(f"[django-ctct] {value} must be defined in settings.py.")
-        raise ImproperlyConfigured(message)
+  default_auto_field = "django.db.models.BigAutoField"
