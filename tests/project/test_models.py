@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 from parameterized import parameterized_class
 
+from django_ctct.exceptions import LocalObjectDoesNotExist, RemoteObjectDoesNotExist
 from django_ctct.models import (
   CampaignActivity,
   Contact,
@@ -232,7 +233,7 @@ class ModelTest[E: CTCTEndpointModel](TestCRUD[E], TestCase):
     """Create the object locally and remotely."""
 
     # PK is required
-    with self.assertRaises(ValueError):
+    with self.assertRaises(LocalObjectDoesNotExist):
       self.model.remote.create(obj)
 
     obj.save()
@@ -246,12 +247,12 @@ class ModelTest[E: CTCTEndpointModel](TestCRUD[E], TestCase):
 
     # PK is required
     obj.pk, obj.api_id = None, api_id
-    with self.assertRaises(ValueError):
+    with self.assertRaises(LocalObjectDoesNotExist):
       self.model.remote.update(obj)
 
     # API ID is required
     obj.pk, obj.api_id = pk, None
-    with self.assertRaises(ValueError):
+    with self.assertRaises(RemoteObjectDoesNotExist):
       self.model.remote.update(obj)
 
     obj.pk, obj.api_id = pk, api_id

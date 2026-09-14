@@ -8,6 +8,7 @@ from django.utils import timezone
 from jwt import ExpiredSignatureError
 from requests.exceptions import HTTPError
 
+from django_ctct.exceptions import LocalObjectDoesNotExist, RemoteObjectDoesNotExist
 from django_ctct.models import (
   CampaignActivity,
   CampaignSummary,
@@ -317,7 +318,7 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
     self,
     token_decode: MagicMock,
   ) -> None:
-    """Extra unexpected fields returned from sign_up_form should raise ValueError."""
+    """Extra unexpected fields returned by API should raise NotImplementedError."""
 
     token_decode.return_value = True
 
@@ -327,13 +328,13 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
       status_code=200,
       json={"action": "created", "contact_id": str(uuid4()), "unexpected_field": "foo"},
     )
-    with self.assertRaises(ValueError):
+    with self.assertRaises(NotImplementedError):
       self.model.remote.update_or_create(obj)
 
   def test_update_or_create_requires_pk(self, token_decode: MagicMock) -> None:
     token_decode.return_value = True
     contact = self.factory.build(api_id=None)
-    with self.assertRaises(ValueError):
+    with self.assertRaises(LocalObjectDoesNotExist):
       self.model.remote.update_or_create(contact)
 
   def test_delete_ignores_404(self, token_decode: MagicMock) -> None:
@@ -398,7 +399,7 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
   ) -> None:
     token_decode.return_value = True
     campaign = self.factory.create(api_id=None)
-    with self.assertRaises(ValueError):
+    with self.assertRaises(RemoteObjectDoesNotExist):
       self.model.remote.update(campaign)
 
   def test_campaign_activity_create_raises_not_implemented(
@@ -520,13 +521,13 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
       url=Contact.remote.get_url(fake_id),
       status_code=404,
     )
-    with self.assertRaises(Contact.DoesNotExist):
+    with self.assertRaises(RemoteObjectDoesNotExist):
       Contact.remote.get(fake_id)
 
   def test_email_campaign_update_requires_pk(self, token_decode: MagicMock) -> None:
     token_decode.return_value = True
     campaign = self.factory.build(api_id=uuid4())
-    with self.assertRaises(ValueError):
+    with self.assertRaises(LocalObjectDoesNotExist):
       EmailCampaign.remote.update(campaign)
 
   def test_campaign_activity_update_non_primary_role_raises(
@@ -579,7 +580,7 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
   ) -> None:
     token_decode.return_value = True
     campaign = self.factory.build()
-    with self.assertRaises(ValueError):
+    with self.assertRaises(LocalObjectDoesNotExist):
       self.model.remote.create(campaign)  # type: ignore[misc]
 
   def test_email_campaign_create_with_preview_and_permalink_activity(

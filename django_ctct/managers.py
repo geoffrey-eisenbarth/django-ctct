@@ -23,6 +23,7 @@ from requests.exceptions import HTTPError
 from requests.models import Response
 
 from django_ctct.conf import get_setting
+from django_ctct.exceptions import LocalObjectDoesNotExist, RemoteObjectDoesNotExist
 from django_ctct.utils import get_related_fields
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -473,7 +474,7 @@ class RemoteManager[E: CTCTEndpointModel](
     """
 
     if not obj.pk:
-      raise ValueError("Must create object locally first.")
+      raise LocalObjectDoesNotExist
 
     response = self.request(
       "post",
@@ -513,7 +514,11 @@ class RemoteManager[E: CTCTEndpointModel](
     try:
       data = self.raise_or_json(response)
     except Http404:
-      raise self.model.DoesNotExist(api_id)
+      raise RemoteObjectDoesNotExist(
+        message=_("ConstantContact API returning 404 for {api_id}").format(
+          api_id=api_id
+        )
+      )
 
     obj, list_of_related_objs = self.deserialize(data)
     return obj, list_of_related_objs
@@ -564,9 +569,9 @@ class RemoteManager[E: CTCTEndpointModel](
     """
 
     if obj.pk is None:
-      raise ValueError("Must create object locally first.")
+      raise LocalObjectDoesNotExist
     elif obj.api_id is None:
-      raise ValueError("Must create object remotely first.")
+      raise RemoteObjectDoesNotExist
 
     response = self.request(
       "put",
@@ -717,7 +722,7 @@ class ContactRemoteManager(RemoteManager["Contact"]):
     """
 
     if obj.pk is None:
-      raise ValueError("Must create object locally first.")
+      raise LocalObjectDoesNotExist
 
     # This endpoint expects a slightly different serialization
     data = self.serialize(obj)
@@ -733,7 +738,9 @@ class ContactRemoteManager(RemoteManager["Contact"]):
     # CTCT doesn't return a full object at this endpoint
     _, api_id = data.pop("action"), data.pop("contact_id")
     if data:
-      raise ValueError(f"Unexpected response data: {data}.")
+      raise NotImplementedError(
+        _("Unexpected response data: {data}.").format(data=data)
+      )
 
     # Save the API id
     obj.api_id = api_id
@@ -772,7 +779,7 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
 
     # Validate
     if obj.pk is None:
-      raise ValueError("Must create object locally first.")
+      raise LocalObjectDoesNotExist
     try:
       activity = obj.campaign_activities.get(role="primary_email")
     except CampaignActivity.DoesNotExist:
@@ -834,9 +841,9 @@ class EmailCampaignRemoteManager(RemoteManager["EmailCampaign"]):
 
     """
     if obj.pk is None:
-      raise ValueError("Must create object locally first.")
+      raise LocalObjectDoesNotExist
     elif obj.api_id is None:
-      raise ValueError("Must create object remotely first.")
+      raise RemoteObjectDoesNotExist
 
     response = self.request(
       "patch",
