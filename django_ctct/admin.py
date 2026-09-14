@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
-from django.db.models import Case, F, FloatField, Model, QuerySet, When
+from django.db.models import Case, Count, F, FloatField, Model, Q, QuerySet, When
 from django.db.models.functions import Cast
 from django.forms import ModelForm
 from django.forms.models import BaseInlineFormSet, BaseModelFormSet
@@ -215,13 +215,36 @@ class ContactListAdmin(RemoteModelAdmin[ContactList]):
     "is_synced",
   )
 
-  @admin.display(description=_("Membership"))
-  def membership(self, obj: ContactList) -> int:
-    return obj.members.all().count()
+  def get_queryset(self, request: HttpRequest) -> QuerySet[ContactList]:
+    """Annotate member counts to avoid per-row queries in the changelist."""
+    qs: QuerySet[ContactList] = super().get_queryset(request)
+    qs = qs.annotate(
+      membership_count=Count("members", distinct=True),
+      optout_count=Count(
+        "members",
+        filter=~Q(members__opt_out_source=""),
+        distinct=True,
+      ),
+    )
+    return qs
 
-  @admin.display(description=_("Opt Outs"))
+  @admin.display(
+    description=_("Membership"),
+    ordering="membership_count",
+  )
+  def membership(self, obj: ContactList) -> int:
+    membership_count = getattr(obj, "membership_count", None)  # set via annotation
+    assert isinstance(membership_count, int)
+    return membership_count
+
+  @admin.display(
+    description=_("Opt Outs"),
+    ordering="optout_count",
+  )
   def optouts(self, obj: ContactList) -> int:
-    return obj.members.exclude(opt_out_source="").count()
+    optout_count = getattr(obj, "optout_count", None)  # set via annotation
+    assert isinstance(optout_count, int)
+    return optout_count
 
   # ChangeView
   form = ContactListForm
