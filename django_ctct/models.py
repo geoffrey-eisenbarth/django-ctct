@@ -11,11 +11,12 @@ from typing import (
 import jwt
 from django.conf import settings
 from django.core.validators import MaxLengthValidator, validate_email
-from django.db import models
+from django.db import IntegrityError, models
 from django.db.models import Model
 from django.db.models.base import Model as BaseModel
 from django.db.models.fields import NOT_PROVIDED
 from django.utils import formats, timezone
+from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.conf import get_setting
@@ -221,8 +222,8 @@ class CTCTModel(SerialModel):
       field = cls._meta.get_field(field_name)
       assert hasattr(field, "default")
       if field.default is NOT_PROVIDED:  # pragma: no cover
-        raise ValueError(
-          _("Must provide a default value for {model}.{field}.").format(
+        raise IntegrityError(
+          gettext("Must provide a default value for {model}.{field}.").format(
             model=cls.__name__,
             field=field_name,
           )

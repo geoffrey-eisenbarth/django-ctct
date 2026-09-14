@@ -16,7 +16,7 @@ from django.http import Http404, HttpRequest
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 from django.utils.module_loading import import_string
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 from jwt import ExpiredSignatureError
 from ratelimit import limits, sleep_and_retry
 from requests.exceptions import HTTPError

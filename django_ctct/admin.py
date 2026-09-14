@@ -17,7 +17,8 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.formats import date_format
 from django.utils.html import format_html
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 from requests.exceptions import HTTPError
 
 from django_ctct.conf import get_setting
@@ -61,7 +62,7 @@ def catch_api_errors[S: admin.ModelAdmin[Any], **P](
           raise e  # pragma: no cover
         self.message_user(
           request=request,
-          message=format_html(_("ConstantContact: {error}"), error=str(e)),
+          message=format_html(gettext("ConstantContact: {error}"), error=str(e)),
           level=messages.ERROR,
         )
 
@@ -326,9 +327,9 @@ class ContactStatusFilter(admin.SimpleListFilter):
   """Simple filter for CTCT Status."""
 
   STATUSES = (
-    ("sync", _("Synced")),
-    ("not_synced", _("Not Synced")),
-    ("optout", _("Opted Out")),
+    ("sync", "Synced"),
+    ("not_synced", "Not Synced"),
+    ("optout", "Opted Out"),
   )
 
   title = "Status"
@@ -676,7 +677,9 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
         activity_form = activity_formset[0]
       else:  # pragma: no cover
         raise ImproperlyConfigured(
-          _("CampaignActivityInline must be present in EmailCampaignAdmin.inlines")
+          gettext(
+            "CampaignActivityInline must be present in EmailCampaignAdmin.inlines"
+          )
         )
 
       inline_changed = activity_form.changed_data and not campaign_created
@@ -720,7 +723,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       preview = ""
 
     message = format_html(
-      _("The {name} “{obj}” has been {action}{preview}."),
+      gettext("The {name} “{obj}” has been {action}{preview}."),
       **{
         "name": campaign._meta.verbose_name,
         "obj": campaign,
