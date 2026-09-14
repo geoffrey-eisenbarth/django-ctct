@@ -387,3 +387,14 @@ class CampaignActivityTests(
     self.existing_obj.save()
     with self.assertRaises(ValueError):
       CampaignActivity.remote.unschedule(self.existing_obj)
+
+
+class CampaignSummaryModelTests(TestCase):
+  def test_save(self) -> None:
+    campaign = get_factory(EmailCampaign).create()
+    summary = campaign.summary
+    summary.api_id = None
+    summary.save()
+    self.assertEqual(summary.api_id, campaign.api_id)
+    # Saving again when api_id is not None exercises the branch
+    summary.save()

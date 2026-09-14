@@ -4,6 +4,7 @@ from uuid import uuid4
 import requests_mock
 from django.http import Http404
 from django.test import TestCase
+from django.utils import timezone
 from jwt import ExpiredSignatureError
 from requests.exceptions import HTTPError
 
@@ -331,15 +332,17 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
 
 
 @patch("django_ctct.models.Token.decode")
-class EmailCampaignAndActivityManagerTests(TestCase):
+class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], TestCase):
   """Tests for EmailCampaign and CampaignActivity manager edge cases."""
 
-  def setUp(self) -> None:
-    Token.objects._cached_token = None
-    self.mock_api = requests_mock.Mocker()
-    self.mock_api.start()
-    self.addCleanup(self.mock_api.stop)
-    TokenFactory.create()
+  model = EmailCampaign
+
+  def get_activity_response(self, activity: CampaignActivity) -> JsonDict:
+    """Mock the API response for a CampaignActivity."""
+    data = CampaignActivity.serializer.serialize(activity, field_types="all")
+    data[CampaignActivity.API_ID_LABEL] = str(activity.api_id or uuid4())
+    data["role"] = activity.role
+    return data
 
   def test_email_campaign_create_with_existing_activity(
     self,
@@ -347,26 +350,22 @@ class EmailCampaignAndActivityManagerTests(TestCase):
   ) -> None:
     token_decode.return_value = True
 
-    campaign = get_factory(EmailCampaign).create()
+    campaign = self.factory.create()
     primary_activity = campaign.campaign_activities.get(role="primary_email")
-    api_id = uuid4()
+
+    api_response = self.get_api_response(campaign)
+    api_response["campaign_activities"] = [
+      {
+        "campaign_activity_id": str(primary_activity.api_id or uuid4()),
+        "role": "primary_email",
+      }
+    ]
     self.mock_api.post(
-      url=EmailCampaign.remote.get_url(),
+      url=self.model.remote.get_url(),
       status_code=201,
-      json={
-        "campaign_id": str(campaign.api_id or api_id),
-        "name": campaign.name,
-        "created_at": "2026-01-01T00:00:00Z",
-        "updated_at": "2026-01-01T00:00:00Z",
-        "campaign_activities": [
-          {
-            "campaign_activity_id": str(primary_activity.api_id or api_id),
-            "role": "primary_email",
-          }
-        ],
-      },
+      json=api_response,
     )
-    res = EmailCampaign.remote.create(campaign)  # type: ignore[misc]
+    res = self.model.remote.create(campaign)  # type: ignore[misc]
     self.assertEqual(res.pk, campaign.pk)
 
   def test_email_campaign_update_requires_api_id(
@@ -374,9 +373,9 @@ class EmailCampaignAndActivityManagerTests(TestCase):
     token_decode: MagicMock,
   ) -> None:
     token_decode.return_value = True
-    campaign = get_factory(EmailCampaign).create(api_id=None)
+    campaign = self.factory.create(api_id=None)
     with self.assertRaises(ValueError):
-      EmailCampaign.remote.update(campaign)
+      self.model.remote.update(campaign)
 
   def test_campaign_activity_create_raises_not_implemented(
     self,
@@ -422,6 +421,71 @@ class EmailCampaignAndActivityManagerTests(TestCase):
     data = CampaignSummary.remote.serialize(summary, field_types="all")
     self.assertIn("unique_counts", data)
 
+  def test_campaign_activity_update_when_scheduled(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    campaign = self.factory.create(
+      current_status="SCHEDULED",
+      scheduled_datetime=timezone.now(),
+    )
+    activity = campaign.campaign_activities.get(role="primary_email")
+    activity.contact_lists.add(self.contact_lists[0])
+
+    self.mock_api.delete(
+      url=CampaignActivity.remote.get_url(
+        activity.api_id, endpoint_suffix="/schedules"
+      ),
+      status_code=204,
+    )
+    self.mock_api.put(
+      url=CampaignActivity.remote.get_url(activity.api_id),
+      status_code=200,
+      json=self.get_activity_response(activity),
+    )
+    self.mock_api.post(
+      url=CampaignActivity.remote.get_url(
+        activity.api_id, endpoint_suffix="/schedules"
+      ),
+      status_code=200,
+      json={},
+    )
+
+    CampaignActivity.remote.update(activity)
+    self.assertEqual(self.mock_api.call_count, 3)
+
+  def test_email_campaign_create_without_local_activity(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    campaign = EmailCampaign.objects.create(name="No Activity Campaign")
+
+    api_response = self.get_api_response(campaign)
+    api_response["campaign_activities"] = [
+      {
+        "campaign_activity_id": str(uuid4()),
+        "role": "primary_email",
+      }
+    ]
+    self.mock_api.post(
+      url=self.model.remote.get_url(),
+      status_code=201,
+      json=api_response,
+    )
+    res = self.model.remote.create(campaign)  # type: ignore[misc]
+    self.assertEqual(res.pk, campaign.pk)
+    self.assertTrue(campaign.campaign_activities.filter(role="primary_email").exists())
+
+  def test_bulk_delete_raises_when_no_endpoint(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    with self.assertRaises(NotImplementedError):
+      EmailCampaign.remote.bulk_delete(EmailCampaign.objects.all())
+
   def test_remote_manager_get_404_raises_does_not_exist(
     self,
     token_decode: MagicMock,
@@ -434,3 +498,100 @@ class EmailCampaignAndActivityManagerTests(TestCase):
     )
     with self.assertRaises(Contact.DoesNotExist):
       Contact.remote.get(fake_id)
+
+  def test_email_campaign_update_requires_pk(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+    campaign = self.factory.build(api_id=uuid4())
+    with self.assertRaises(ValueError):
+      EmailCampaign.remote.update(campaign)
+
+  def test_campaign_activity_update_non_primary_role_raises(
+    self, token_decode: MagicMock
+  ) -> None:
+    token_decode.return_value = True
+    activity = get_factory(CampaignActivity).create(role="permalink")
+    with self.assertRaises(NotImplementedError):
+      CampaignActivity.remote.update(activity)
+
+  def test_serialize_unsaved_models(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+    unsaved_campaign = EmailCampaign()
+    data = EmailCampaign.serializer.serialize(unsaved_campaign, field_types="all")
+    self.assertIsInstance(data, dict)
+
+    unsaved_contact = Contact()
+    data = Contact.serializer.serialize(unsaved_contact, field_types="all")
+    self.assertIsInstance(data, dict)
+
+    data_edit = EmailCampaign.serializer.serialize(
+      unsaved_campaign, field_types="editable"
+    )
+    self.assertIn("name", data_edit)
+
+    # Without an api_id, remote.serialize() falls back to full serialization
+    data_all = self.model.remote.serialize(unsaved_campaign, field_types="editable")
+    self.assertIn("name", data_all)
+
+  def test_deserialize_related_fields(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+
+    # Test deserialize_related_obj_fields with parent_pk
+    summary_data = {"sends": 100, "campaign_id": 999}
+    deserialized = CampaignSummary.serializer.deserialize_related_obj_fields(
+      summary_data, parent_pk=123
+    )
+    self.assertEqual(deserialized["campaign_id"], 123)
+
+    # Test deserialize_related_objs_fields with empty list
+    _, related = Contact.serializer.deserialize_related_objs_fields(
+      {"street_addresses": [], "list_memberships": []},
+      parent_pk=123,
+    )
+    self.assertEqual(related, [])
+
+  def test_email_campaign_create_requires_pk(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    campaign = self.factory.build()
+    with self.assertRaises(ValueError):
+      self.model.remote.create(campaign)  # type: ignore[misc]
+
+  def test_email_campaign_create_with_preview_and_permalink_activity(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    token_decode.return_value = True
+    campaign = self.factory.create(send_preview=True)
+    activity = campaign.campaign_activities.get(role="primary_email")
+    activity.api_id = activity.api_id or uuid4()
+
+    api_response = self.get_api_response(campaign)
+    api_response["campaign_activities"] = [
+      {
+        "campaign_activity_id": str(uuid4()),
+        "role": "permalink",
+      },
+      {
+        "campaign_activity_id": str(activity.api_id),
+        "role": "primary_email",
+      },
+    ]
+    self.mock_api.post(
+      url=self.model.remote.get_url(),
+      status_code=201,
+      json=api_response,
+    )
+    self.mock_api.put(
+      url=CampaignActivity.remote.get_url(activity.api_id),
+      status_code=200,
+      json=self.get_activity_response(activity),
+    )
+    self.mock_api.post(
+      url=CampaignActivity.remote.get_url(activity.api_id, endpoint_suffix="/tests"),
+      status_code=200,
+      json={},
+    )
+    res = self.model.remote.create(campaign)  # type: ignore[misc]
+    self.assertEqual(res.pk, campaign.pk)
