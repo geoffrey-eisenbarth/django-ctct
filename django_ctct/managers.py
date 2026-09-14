@@ -123,7 +123,11 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
       # Allow catching 404 separately from HTTPError
       raise Http404
     else:
-      data = response.json()
+      try:
+        data = response.json()
+      except ValueError:
+        # Non-JSON body (e.g. an HTML error page from a proxy)
+        data = {}
 
     try:
       response.raise_for_status()
