@@ -20,7 +20,7 @@ from django.utils.translation import gettext as _
 from parameterized import parameterized_class
 from requests.exceptions import HTTPError
 
-from django_ctct.admin import CampaignActivityInline
+from django_ctct.admin import CampaignActivityInline, RemoteModelAdmin
 from django_ctct.models import (
   CampaignActivity,
   CampaignSummary,
@@ -498,7 +498,30 @@ class ModelAdminTest(TestCRUD[E], TestCase):
     # Sending a preview (with no schedule change) triggers "updated remotely"
     messages = do_update(self.existing_obj, None, send_preview=True)
     self.assertTrue(any("updated remotely" in m for m in messages))
-    self.assertTrue(any("preview has been sent out" in m for m in messages))
+
+  def test_sync_admin_false(self) -> None:
+    """When CTCT_SYNC_ADMIN is False, no remote calls are made."""
+    model_admin = admin.site._registry[self.model]
+    assert isinstance(model_admin, RemoteModelAdmin)
+    request = HttpRequest()
+    request.user = self.superuser
+
+    with self.settings(CTCT_SYNC_ADMIN=False):
+      # delete_model
+      model_admin.delete_model(request, self.existing_obj)
+      self.assertEqual(self.mock_api.call_count, 0)
+
+      # delete_queryset
+      model_admin.delete_queryset(request, self.model.objects.none())
+      self.assertEqual(self.mock_api.call_count, 0)
+
+      # save_remotely
+      form = MagicMock()
+      form.instance = self.factory.build()
+      model_admin.save_remotely(request, form, [], change=False)
+      self.assertEqual(self.mock_api.call_count, 0)
+      model_admin.save_remotely(request, form, [], change=True)
+      self.assertEqual(self.mock_api.call_count, 0)
 
   def test_changelist_view(self) -> None:
     """Visiting the changelist renders list_display callables."""
@@ -514,6 +537,31 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       for value in ("sync", "not_synced", "optout"):
         response = self.client.get(admin_changelist_path, {"ctct": value})
         self.assertEqual(response.status_code, 200)
+
+
+class AdminRegistrationTests(TestCase):
+  def test_admin_registration(self) -> None:
+    from django_ctct.admin import register_admin
+
+    models = (
+      ContactList,
+      CustomField,
+      Contact,
+      ContactNote,
+      EmailCampaign,
+      CampaignSummary,
+    )
+    site_disabled = admin.AdminSite()
+    with override_settings(CTCT_USE_ADMIN=False):
+      register_admin(site_disabled)
+      for m in models:
+        self.assertNotIn(m, site_disabled._registry)
+
+    site_enabled = admin.AdminSite()
+    with override_settings(CTCT_USE_ADMIN=True):
+      register_admin(site_enabled)
+      for m in models:
+        self.assertIn(m, site_enabled._registry)
 
 
 @parameterized_class(

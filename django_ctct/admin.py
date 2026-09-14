@@ -794,10 +794,16 @@ class CampaignSummaryAdmin(ViewModelAdmin):
   )
 
 
-if getattr(settings, "CTCT_USE_ADMIN", False):
-  admin.site.register(ContactList, ContactListAdmin)
-  admin.site.register(CustomField, CustomFieldAdmin)
-  admin.site.register(Contact, ContactAdmin)
-  admin.site.register(ContactNote, ContactNoteAdmin)
-  admin.site.register(EmailCampaign, EmailCampaignAdmin)
-  admin.site.register(CampaignSummary, CampaignSummaryAdmin)
+def register_admin(site: admin.AdminSite | None = None) -> None:
+  if site is None:
+    site = admin.site
+  if get_setting("CTCT_USE_ADMIN"):
+    site.register(ContactList, ContactListAdmin)
+    site.register(CustomField, CustomFieldAdmin)
+    site.register(Contact, ContactAdmin)
+    site.register(ContactNote, ContactNoteAdmin)
+    site.register(EmailCampaign, EmailCampaignAdmin)
+    site.register(CampaignSummary, CampaignSummaryAdmin)
+
+
+register_admin()
