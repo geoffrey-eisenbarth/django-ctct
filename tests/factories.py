@@ -1,9 +1,8 @@
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
 import factory
 import factory.fuzzy
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import User
 from django.db.models import Model
 from factory.django import DjangoModelFactory
 from faker import Faker as RealFaker
@@ -29,16 +28,13 @@ NUM_RELATED_OBJS: dict[type[CTCTModel], int] = {
 }
 
 
-U = TypeVar("U", bound=AbstractUser)
-
-
 def get_factory[M: Model](model: type[M]) -> type[DjangoModelFactory[M]]:
   return cast(type[DjangoModelFactory[M]], FACTORIES[model])
 
 
-class UserFactory(DjangoModelFactory[U]):
+class UserFactory(DjangoModelFactory[User]):
   class Meta:
-    model = get_user_model()
+    model = User
 
   username = factory.Sequence(lambda n: f"user{n}")
   email = factory.Sequence(lambda n: f"user{n}@example.com")

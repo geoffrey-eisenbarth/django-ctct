@@ -33,7 +33,7 @@ from django_ctct.models import (
   EmailCampaign,
   JsonDict,
 )
-from tests.factories import get_factory
+from tests.factories import UserFactory, get_factory
 from tests.project.test_models import TestCRUD
 
 if TYPE_CHECKING:
@@ -537,6 +537,42 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       for value in ("sync", "not_synced", "optout"):
         response = self.client.get(admin_changelist_path, {"ctct": value})
         self.assertEqual(response.status_code, 200)
+
+
+class ContactAdminTests(TestCase):
+  def test_save_formset_note_author(self) -> None:
+    existing_note = get_factory(ContactNote).create()
+    contact = existing_note.contact
+    user = UserFactory.create(is_staff=True, is_superuser=True)
+    model_admin = admin.site._registry[Contact]
+    request = HttpRequest()
+    request.user = user
+
+    FormSet = model_admin.get_formsets_with_inlines(request, contact)
+    for FormSetCls, inline in FormSet:
+      if inline.model is ContactNote:
+        fs = FormSetCls(
+          data={
+            "notes-TOTAL_FORMS": "2",
+            "notes-INITIAL_FORMS": "1",
+            "notes-MIN_NUM_FORMS": "0",
+            "notes-MAX_NUM_FORMS": "1000",
+            "notes-0-id": existing_note.pk,
+            "notes-0-content": existing_note.content,
+            "notes-0-DELETE": "on",
+            "notes-1-content": "Testing note author assignment",
+          },
+          instance=contact,
+        )
+        self.assertTrue(fs.is_valid())
+        model_admin.save_formset(request, None, fs, change=True)
+
+        self.assertFalse(ContactNote.objects.filter(pk=existing_note.pk).exists())
+        note = contact.notes.get()
+        self.assertEqual(note.author, user)
+        break
+    else:
+      self.fail("ContactNote inline not found on ContactAdmin.")
 
 
 class AdminRegistrationTests(TestCase):

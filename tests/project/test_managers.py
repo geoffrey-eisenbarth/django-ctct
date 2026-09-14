@@ -330,6 +330,30 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
     with self.assertRaises(ValueError):
       self.model.remote.update_or_create(obj)
 
+  def test_update_or_create_requires_pk(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+    contact = self.factory.build(api_id=None)
+    with self.assertRaises(ValueError):
+      self.model.remote.update_or_create(contact)
+
+  def test_delete_ignores_404(self, token_decode: MagicMock) -> None:
+    token_decode.return_value = True
+    self.mock_api.delete(
+      url=self.model.remote.get_url(self.existing_obj.api_id),
+      status_code=404,
+    )
+    self.model.remote.delete(self.existing_obj)
+
+  def test_serialize_includes_reverse_fk_notes(
+    self,
+    token_decode: MagicMock,
+  ) -> None:
+    """Serializer.serialize() includes reverse FK objects (ContactNotes)."""
+    token_decode.return_value = True
+    data = self.model.serializer.serialize(self.existing_obj, field_types="all")
+    self.assertIn("notes", data)
+    self.assertEqual(len(data["notes"]), self.existing_obj.notes.count())
+
 
 @patch("django_ctct.models.Token.decode")
 class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], TestCase):
