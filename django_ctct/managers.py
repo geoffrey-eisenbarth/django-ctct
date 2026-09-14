@@ -622,8 +622,7 @@ class RemoteManager[E: CTCTEndpointModel](
         _("No API limit specified for {model}.").format(model=self.model.__name__)
       )
 
-    # Prepare connection and payloads
-    self.connect()
+    # Prepare payloads
     api_id_label = self.model.API_ID_LABEL + "s"
     api_ids = [str(o.api_id) for o in objs]
 
