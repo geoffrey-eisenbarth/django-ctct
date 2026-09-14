@@ -63,6 +63,7 @@ select = [
   "F",   # pyflakes (unused imports, undefined names, etc.)
   "I",   # isort (automatically sorts and organizes imports)
   "UP",  # pyupgrade (modernizes Python syntax)
+  "RUF100",  # flags unused noqa comments
 ]
 ignore = [
   "E111",  # Indentation is not a multiple of four
@@ -76,6 +77,10 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
+
+[tool.coverage.run]
+branch = true
+source = ["django_ctct"]
 
 [tool.coverage.report]
 show_missing = true
