@@ -17,28 +17,31 @@ class DatetimeUtilityTests(TestCase):
       dt.datetime(2023, 10, 27, 15, 30, 0),
     )
 
-  def test_with_milliseconds_stripping(self) -> None:
+  def test_with_milliseconds(self) -> None:
     result = to_dt("2023-11-01T08:45:12.987654Z")
     self.assertTrue(timezone.is_aware(result))
     self.assertEqual(
       result.replace(tzinfo=None),
-      dt.datetime(2023, 11, 1, 8, 45, 12),
+      dt.datetime(2023, 11, 1, 8, 45, 12, 987654),
     )
 
   def test_end_of_year_timestamp(self) -> None:
     result = to_dt("2023-12-31T23:59:59Z")
     self.assertEqual(result.replace(tzinfo=None), dt.datetime(2023, 12, 31, 23, 59, 59))
 
-  def test_custom_format_without_milliseconds(self) -> None:
-    result = to_dt("01/15/2024 10:00:00", ts_format="%m/%d/%Y %H:%M:%S")
-    self.assertEqual(
-      result.replace(tzinfo=None),
-      dt.datetime(2024, 1, 15, 10, 0, 0),
-    )
-
-  def test_custom_format_with_milliseconds_handling(self) -> None:
-    result = to_dt("2024-02-20 14:00:00.123456", ts_format="%Y-%m-%d %H:%M:%S")
+  def test_zero_milliseconds(self) -> None:
+    result = to_dt("2024-02-20T14:00:00.000Z")
+    self.assertTrue(timezone.is_aware(result))
     self.assertEqual(
       result.replace(tzinfo=None),
       dt.datetime(2024, 2, 20, 14, 0, 0),
+    )
+
+  def test_naive_timestamp_assumed_utc(self) -> None:
+    result = to_dt("2024-01-15T10:00:00")
+    self.assertTrue(timezone.is_aware(result))
+    self.assertEqual(result.tzinfo, dt.UTC)
+    self.assertEqual(
+      result.replace(tzinfo=None),
+      dt.datetime(2024, 1, 15, 10, 0, 0),
     )

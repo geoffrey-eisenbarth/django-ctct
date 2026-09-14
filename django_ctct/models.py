@@ -951,9 +951,8 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   @classmethod
   def clean_remote_scheduled_datetime(cls, data: JsonDict) -> dt.datetime | None:
     if last_sent_date := data.get("last_sent_date", None):
-      # Not sure why this ts_format is different
       assert isinstance(last_sent_date, str)
-      return to_dt(last_sent_date, ts_format="%Y-%m-%dT%H:%M:%S.000Z")
+      return to_dt(last_sent_date)
     else:
       assert last_sent_date is None
       return last_sent_date

@@ -19,13 +19,19 @@ type RelatedFields = tuple[
 ]
 
 
-def to_dt(s: str, ts_format: str = "%Y-%m-%dT%H:%M:%SZ") -> dt.datetime:
-  if "." in s:
-    # Remove milliseconds
-    s = s.split(".")[0]
-  if ts_format.endswith("Z") and not s.endswith("Z"):
-    s += "Z"
-  return timezone.make_aware(dt.datetime.strptime(s, ts_format))
+def to_dt(s: str) -> dt.datetime:
+  """Parse an ISO 8601 timestamp from the API into an aware datetime.
+
+  Notes
+  -----
+  The API returns UTC timestamps (with or without milliseconds), so naive
+  values are assumed to be UTC.
+
+  """
+  parsed = dt.datetime.fromisoformat(s)
+  if timezone.is_naive(parsed):
+    parsed = timezone.make_aware(parsed, dt.UTC)
+  return parsed
 
 
 def get_related_fields(model: type[Model]) -> RelatedFields:
