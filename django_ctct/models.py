@@ -1172,10 +1172,10 @@ class CampaignActivity(CTCTEndpointModel):
 
   @classmethod
   def clean_remote_contact_lists(cls, data: JsonDict) -> list[str]:
-    l = data.pop("contact_list_ids", [])  # noqa: E741
-    assert isinstance(l, list)
-    assert all([isinstance(i, str) for i in l])
-    return l
+    ids = data.pop("contact_list_ids", [])
+    assert isinstance(ids, list)
+    assert all([isinstance(i, str) for i in ids])
+    return ids
 
   def clean_html_content(self, html_content: str) -> str:
     if self.TRACKING_IMAGE not in html_content:

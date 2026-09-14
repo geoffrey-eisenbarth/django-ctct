@@ -425,11 +425,8 @@ class Serializer[S: SerialModel](Manager[S]):
     # Restrict to the fields defined in the Django object
     # NOTE: We prefer `field.attname` over `field.name` in order to pick up
     #       ForeignKeys and OneToOneFields
-    data = {
-      k: v
-      for k, v in data.items()
-      if k in [getattr(f, "attname", f.name) for f in model_fields]
-    }
+    field_attnames = {getattr(f, "attname", f.name) for f in model_fields}
+    data = {k: v for k, v in data.items() if k in field_attnames}
 
     # Convert any remaining API ids to Django PKs
     for k, v in data.items():
@@ -646,7 +643,7 @@ class ContactListRemoteManager(RemoteManager["ContactList"]):
     Contact = self.model._meta.get_field("members").related_model
     if is_ctct(Contact) and hasattr(Contact, "API_ENDPOINT_BULK_LIMIT"):
       step_size = Contact.API_ENDPOINT_BULK_LIMIT
-    else:
+    else:  # pragma: no cover
       raise ImproperlyConfigured(_("Contact must specify 'API_ENDPOINT_BULK_LIMIT'."))
 
     if contact_list is not None:
