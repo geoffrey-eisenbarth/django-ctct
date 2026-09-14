@@ -155,6 +155,47 @@ class TokenRemoteManagerTest(TestCase):
       Token.remote.create("some-auth-code")
     self.assertIn("invalid_grant", str(ctx.exception))
 
+    # Error response formatted as list of dicts
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=400,
+      json=[{"error_message": "List error format"}],
+    )
+    with self.assertRaises(HTTPError) as ctx:
+      Token.remote.create("some-auth-code")
+    self.assertIn("List error format", str(ctx.exception))
+
+    # Non-JSON error body (e.g. an HTML error page from a proxy)
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=502,
+      text="<html>Bad Gateway</html>",
+    )
+    with self.assertRaises(HTTPError):
+      Token.remote.create("some-auth-code")
+
+  def test_force_refresh_with_cached_token(self) -> None:
+    token = TokenFactory.create()
+    Token.objects._cached_token = token
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=200,
+      json=self.get_token_response(access_token="forced-refresh-token"),
+    )
+    refreshed = Token.objects.get_valid(force_refresh=True)
+    self.assertEqual(refreshed.access_token, "forced-refresh-token")
+
+  def test_get_valid_with_expired_cached_token(self) -> None:
+    token = TokenFactory.create(expires_in=0)
+    Token.objects._cached_token = token
+    self.mock_api.post(
+      url=Token.remote.get_url(),
+      status_code=200,
+      json=self.get_token_response(access_token="refreshed-cached-token"),
+    )
+    refreshed = Token.objects.get_valid()
+    self.assertEqual(refreshed.access_token, "refreshed-cached-token")
+
 
 @patch("django_ctct.models.Token.decode")
 class ContactListManagerTests(RequestsMockMixin[ContactList], TestCase):

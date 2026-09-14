@@ -13,8 +13,8 @@ from django.db import models
 from django.db.models.manager import Manager
 from django.db.models.query import QuerySet
 from django.http import Http404, HttpRequest
-from django.middleware.csrf import get_token as get_csrf_token
 from django.urls import reverse
+from django.utils.crypto import get_random_string
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 from jwt import ExpiredSignatureError
@@ -166,14 +166,26 @@ class TokenManager(Manager["Token"]):
 class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
   """Manager for utilizing CTCT's Auth Token API."""
 
+  OAUTH_STATE_SESSION_KEY: ClassVar[str] = "ctct_oauth_state"
+
   def get_auth_url(self, request: HttpRequest) -> str:
-    """Returns a URL for logging into CTCT.com to grant permissions."""
+    """Returns a URL for logging into CTCT.com to grant permissions.
+
+    Notes
+    -----
+    A random `state` value is stored in the session so the callback view can
+    verify that the OAuth flow was initiated by this user.
+
+    """
+    state = get_random_string(32)
+    request.session[self.OAUTH_STATE_SESSION_KEY] = state
+
     endpoint = self.get_url(endpoint="/authorize")
     data = {
       "client_id": settings.CTCT_PUBLIC_KEY,
       "redirect_uri": settings.CTCT_REDIRECT_URI,
       "response_type": "code",
-      "state": get_csrf_token(request),
+      "state": state,
       "scope": self.model.API_SCOPE,
     }
     url = f"{endpoint}?{urlencode(data, safe='+')}"
@@ -206,8 +218,7 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
     )
     data = self.raise_or_json(response)
     token = self.model.objects.create(**data)
-    if isinstance(self.model.objects, TokenManager):
-      self.model.objects._cached_token = token
+    self.model.objects._cached_token = token
     return token
 
   def refresh(self, token: Token) -> Token:
@@ -224,8 +235,7 @@ class TokenRemoteManager(ConnectionManagerMixin["Token"], Manager["Token"]):
     )
     data = self.raise_or_json(response)
     new_token = self.model.objects.create(**data)
-    if isinstance(self.model.objects, TokenManager):
-      self.model.objects._cached_token = new_token
+    self.model.objects._cached_token = new_token
     return new_token
 
 
