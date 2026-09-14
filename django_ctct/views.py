@@ -24,11 +24,12 @@ def auth(request: HttpRequest) -> HttpResponse:
       Token.remote.create(auth_code)
     except Exception:
       logger.exception("Failed to create CTCT Token.")
-      message = _("Failed to create the token. Check the server logs for details.")
-      return HttpResponse(message, status=502)
+      return HttpResponse(
+        _("Failed to create the token. Check the server logs for details."),
+        status=502,
+      )
     else:
-      message = _("Successfully created and stored the token.")
-      return HttpResponse(message)
+      return HttpResponse(_("Successfully created and stored the token."))
 
   else:
     # An admin must provide CTCT access manually

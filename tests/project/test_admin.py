@@ -60,8 +60,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
   def setUpClass(cls) -> None:
     super().setUpClass()
     if cls is ModelAdminTest:
-      message = _("This is the unparameterized base class.")
-      raise SkipTest(message)
+      raise SkipTest(_("Skipping the unparameterized base class."))
 
   def setUp(self) -> None:
     super().setUp()
@@ -280,8 +279,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       # CTCT does not provide a bulk delete endpoint
       return
     elif self.model.API_ENDPOINT_BULK_LIMIT is None:
-      message = _("Must specify API_ENDPOINT_BULK_LIMIT.")
-      raise ImproperlyConfigured(message)
+      raise ImproperlyConfigured(_("Must specify API_ENDPOINT_BULK_LIMIT."))
 
     token_decode.return_value = True
 

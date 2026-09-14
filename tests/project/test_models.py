@@ -95,16 +95,13 @@ class TestCRUD[E: CTCTEndpointModel](RequestsMockMixin[E]):
   model: type[E]
 
   def create_obj(self, obj: E) -> E:
-    message = _("Must define `create_obj` on the inheriting class.")
-    raise ImproperlyConfigured(message)
+    raise ImproperlyConfigured(_("Must define `create_obj` on the inheriting class."))
 
   def update_obj(self, obj: E) -> E:
-    message = _("Must define `update_obj` on the inheriting class.")
-    raise ImproperlyConfigured(message)
+    raise ImproperlyConfigured(_("Must define `update_obj` on the inheriting class."))
 
   def delete_obj(self, obj: E) -> None:
-    message = _("Must define `delete_obj` on the inheriting class.")
-    raise ImproperlyConfigured(message)
+    raise ImproperlyConfigured(_("Must define `delete_obj` on the inheriting class."))
 
   @patch("django_ctct.models.Token.decode")
   def test_create(self, token_decode: MagicMock) -> None:
@@ -245,8 +242,7 @@ class ModelTest[E: CTCTEndpointModel](TestCRUD[E], TestCase):
   def setUpClass(cls) -> None:
     super().setUpClass()
     if cls is ModelTest:
-      message = _("This is the unparameterized base class.")
-      raise unittest.SkipTest(message)
+      raise unittest.SkipTest(_("Skipping the unparameterized base class."))
 
   def create_obj(self, obj: E) -> E:
     """Create the object locally and remotely."""

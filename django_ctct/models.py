@@ -222,7 +222,10 @@ class CTCTModel(SerialModel):
       assert hasattr(field, "default")
       if field.default is NOT_PROVIDED:  # pragma: no cover
         raise ValueError(
-          _(f"Must provide a default value for {cls.__name__}.{field_name}.")
+          _("Must provide a default value for {model}.{field}.").format(
+            model=cls.__name__,
+            field=field_name,
+          )
         )
       else:
         default = field.default

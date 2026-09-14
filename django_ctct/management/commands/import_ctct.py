@@ -63,13 +63,10 @@ class Command(BaseCommand):
     update_conflicts: bool = True,
     unique_fields: Collection[str] | None = ["api_id"],
     update_fields: Collection[str] | None = None,
-    silent: bool | None = None,
   ) -> list[M]:
     """Perform upsert using `bulk_create()`."""
 
     verb = "Imported" if (update_fields is None) else "Updated"
-    if silent is None:
-      silent = self.noinput
 
     if model._meta.auto_created and hasattr(model, "contactlist_id"):
       # Delete existing through model instances
@@ -114,9 +111,16 @@ class Command(BaseCommand):
     )
 
     # Inform the user
-    if not silent:  # pragma: no cover
-      message = self.style.SUCCESS(f"{verb} {len(objs):,} {model.__name__} instances.")
-      self.stdout.write(message)
+    if not self.noinput:
+      self.stdout.write(
+        self.style.SUCCESS(
+          _("{verb} {count:,} {model} instances.").format(
+            verb=verb,
+            count=len(objs),
+            model=model.__name__,
+          )
+        )
+      )
 
     return objs_w_pks
 
@@ -277,10 +281,14 @@ class Command(BaseCommand):
         note = "Note: This will result in 1 API request per EmailCampaign! "
       else:
         note = ""
-      question = _(f"Import {model.__name__}? {note}(y/n): ")
+      question = _("Import {model}? {note}(y/n): ").format(
+        model=model.__name__,
+        note=note,
+      )
 
       if self.noinput or (input(question).lower()[0] == "y"):
         self.import_model(model)
       else:  # pragma: no cover
-        message = _(f"Skipping {model.__name__}")
-        self.stdout.write(self.style.NOTICE(message))
+        self.stdout.write(
+          self.style.NOTICE(_("Skipping {model}").format(model=model.__name__))
+        )

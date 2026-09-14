@@ -130,9 +130,13 @@ class ConnectionManagerMixin[T: EndpointMixin](Manager[T]):
     except HTTPError:
       if isinstance(data, list):
         data = data[0]
-      # Models use 'error_message', Tokens use 'error_description'
-      error_message = data.get("error_message", data.get("error_description"))
-      raise HTTPError(_(f"[{response.status_code}] {error_message}"), response=response)
+      raise HTTPError(
+        _("[{status_code}] {error_message}").format(
+          status_code=response.status_code,
+          error_message=data.get("error_message", data.get("error_description")),
+        ),
+        response=response,
+      )
 
     return data
 
@@ -605,11 +609,13 @@ class RemoteManager[E: CTCTEndpointModel](
 
     if self.model.API_ENDPOINT_BULK_DELETE is None:
       raise NotImplementedError(
-        _(f"{self.model.__name__} does not have a bulk delete API endpoint.")
+        _("{model} does not have a bulk delete API endpoint.").format(
+          model=self.model.__name__
+        )
       )
     elif self.model.API_ENDPOINT_BULK_LIMIT is None:
       raise ImproperlyConfigured(
-        _(f"No API limit specified for {self.model.__name__}.")
+        _("No API limit specified for {model}.").format(model=self.model.__name__)
       )
 
     # Prepare connection and payloads
@@ -872,7 +878,9 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
 
     if obj.role != "primary_email":
       raise NotImplementedError(
-        _(f"CampaignActivity with role `{obj.role}` not supported yet.")
+        _("CampaignActivity with role `{role}` not supported yet.").format(
+          role=obj.role
+        )
       )
 
     if was_scheduled := (obj.campaign.current_status == "SCHEDULED"):
@@ -929,7 +937,11 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
 
     # Validate role, scheduled_datetime, and contact_lists
     if obj.role != "primary_email":
-      raise ValueError(_(f"Cannot schedule CampaignActivities with role '{obj.role}'."))
+      raise ValueError(
+        _("Cannot schedule CampaignActivities with role '{role}'.").format(
+          role=obj.role
+        )
+      )
 
     if obj.campaign.scheduled_datetime is None:
       raise ValueError(_("Must specify `scheduled_datetime`."))
@@ -951,7 +963,9 @@ class CampaignActivityRemoteManager(RemoteManager["CampaignActivity"]):
       self.delete(obj, endpoint_suffix="/schedules")
     else:
       raise ValueError(
-        _(f"Cannot unschedule CampaignActivities with role '{obj.role}'.")
+        _("Cannot unschedule CampaignActivities with role '{role}'.").format(
+          role=obj.role
+        )
       )
 
 
