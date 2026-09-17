@@ -1,0 +1,11 @@
+{% extends "admin/change_form.html" %}
+
+{% block content %}
+<h1>Compose Campaign</h1>
+<form method="post" action="">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="default">Send Campaign</button>
+</form>{% endblock content %}
+
+{% block object-tools %}{{ block.super }}{% endblock object-tools %}
