@@ -68,12 +68,45 @@ A mixin for the host model's `ModelAdmin` providing customization hooks, routing
   - `def get_campaign_html_content(self, request: HttpRequest, obj: Model) -> str`: Rendered HTML content (e.g. from a template).
   - `def get_campaign_contact_lists(self, request: HttpRequest, obj: Model) -> QuerySet[ContactList]`: Default selected contact lists.
 - **Custom Admin URL & View:**
+  - **Not** a `ModelAdmin.actions` bulk action (those operate on a queryset selected via
+    changelist checkboxes, dispatched through `response_action()`). This is a
+    **single-object custom admin view**, registered by overriding `get_urls()` on the
+    host `ModelAdmin` — the same pattern Django's own built-in admin uses for
+    `auth.User`'s `<id>/password/` change-password view.
   - Custom endpoint: `<path:object_id>/compose-campaign/`
   - `compose_campaign_view(self, request: HttpRequest, object_id: str) -> HttpResponse`:
     - On `GET`: Pre-populates form with hook defaults (or existing campaign data if one is already attached) and renders template.
     - On `POST`: Validates `CampaignComposeForm`, calls `sync_campaign_for_host()`, sets Django success message, and redirects back to host change page.
 - **Admin UI Integration:**
   - Add "Create/Edit Email Campaign" button in object tools or change form template (`change_form_template`).
+
+### 5. Drift Detection (`django_ctct.admin.CampaignHostAdminMixin`)
+Once a host object has an attached `EmailCampaign`, the mixin should proactively surface
+(but never silently push) changes made to the host object after the last sync:
+
+- **Hook:** `def get_host_modified_at(self, obj: Model) -> dt.datetime`: Defaults to
+  `obj.updated_at` (documented as a mixin requirement); override if the host model uses
+  a different field name.
+- **Detection:** No new fields or content-hashing required. `EmailCampaign.updated_at`
+  (via `UpdatedAtMixin`) is already set from CTCT's own `updated_at` on every successful
+  remote sync, so it doubles as a "last synced at" timestamp. Drift is simply:
+  ```python
+  get_host_modified_at(obj) > obj.campaign.updated_at
+  ```
+- **Where it runs:** Inside `save_model()` (or `response_change()`) on the host
+  `ModelAdmin`, called explicitly at the end of the normal admin save flow — the same
+  place `EmailCampaignAdmin.save_remotely` already lives. This is a plain, traceable
+  method call, not a signal.
+- **Surfacing:** If `obj.campaign` is set, `obj.campaign.current_status != "DONE"`, and
+  drift is detected:
+  - Add a `messages.WARNING` (via `format_html` + `reverse`, matching the existing
+    `ctct_message_user` pattern) linking directly to the compose view, e.g. *"This post
+    has changed since its campaign was last synced. [Review & update campaign →]"*.
+  - Render the same warning as a persistent banner in the host's `change_form_template`
+    so it remains visible on return visits, not just as a one-time flash message.
+- **No automatic sync:** Nothing is pushed to CTCT until the user explicitly clicks
+  through to the compose view and resubmits the form — consistent with constraint #2
+  below. This gives "stays in sync by default" visibility without hidden automation.
 
 ---
 
