@@ -14,7 +14,7 @@ from typing import Any, Literal, overload
 
 from django.conf import settings
 
-REQUIRED_SETTINGS: tuple[str, ...] = (
+REQUIRED_SETTINGS = (
   "CTCT_PUBLIC_KEY",
   "CTCT_SECRET_KEY",
   "CTCT_REDIRECT_URI",
@@ -24,7 +24,7 @@ REQUIRED_SETTINGS: tuple[str, ...] = (
 
 # Values may be zero-argument callables, evaluated lazily so that defaults
 # can depend on other Django settings.
-DEFAULTS: dict[str, Any] = {
+DEFAULTS = {
   "CTCT_USE_ADMIN": False,
   "CTCT_SYNC_ADMIN": False,
   "CTCT_ENQUEUE_DEFAULT": False,
