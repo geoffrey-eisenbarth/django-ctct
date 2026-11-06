@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+from abc import ABCMeta, abstractmethod
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
@@ -13,14 +14,19 @@ from django.db.models import Case, Count, F, FloatField, Model, Q, QuerySet, Whe
 from django.db.models.functions import Cast
 from django.forms import ModelForm
 from django.forms.models import BaseInlineFormSet, BaseModelFormSet
-from django.http import HttpRequest
-from django.urls import reverse
+from django.forms.widgets import MediaDefiningClass
+from django.http import Http404, HttpRequest, HttpResponse
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.urls.resolvers import URLPattern
 from django.utils.formats import date_format
 from django.utils.html import format_html
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 from requests.exceptions import HTTPError
 
 from django_ctct.conf import get_setting
+from django_ctct.forms import CampaignComposeForm
 from django_ctct.models import (
   CampaignActivity,
   CampaignSummary,
@@ -34,6 +40,7 @@ from django_ctct.models import (
   CustomField,
   EmailCampaign,
 )
+from django_ctct.services import sync_campaign_for_host
 
 if TYPE_CHECKING:
   from typing import Any, Concatenate
@@ -61,7 +68,7 @@ def catch_api_errors[S: admin.ModelAdmin[Any], **P](
           raise e  # pragma: no cover
         self.message_user(
           request=request,
-          message=format_html(_("ConstantContact: {error}"), error=str(e)),
+          message=format_html(gettext("ConstantContact: {error}"), error=str(e)),
           level=messages.ERROR,
         )
 
@@ -326,9 +333,9 @@ class ContactStatusFilter(admin.SimpleListFilter):
   """Simple filter for CTCT Status."""
 
   STATUSES = (
-    ("sync", _("Synced")),
-    ("not_synced", _("Not Synced")),
-    ("optout", _("Opted Out")),
+    ("sync", "Synced"),
+    ("not_synced", "Not Synced"),
+    ("optout", "Opted Out"),
   )
 
   title = "Status"
@@ -664,7 +671,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       campaign_created = not change
       campaign_updated = change and ("name" in form.changed_data)
       if campaign_created:
-        EmailCampaign.remote.create(campaign)  # type: ignore[misc]
+        EmailCampaign.remote.create(campaign)
       elif campaign_updated:
         EmailCampaign.remote.update(campaign)
 
@@ -676,7 +683,9 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
         activity_form = activity_formset[0]
       else:  # pragma: no cover
         raise ImproperlyConfigured(
-          _("CampaignActivityInline must be present in EmailCampaignAdmin.inlines")
+          gettext(
+            "CampaignActivityInline must be present in EmailCampaignAdmin.inlines"
+          )
         )
 
       inline_changed = activity_form.changed_data and not campaign_created
@@ -720,7 +729,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       preview = ""
 
     message = format_html(
-      _("The {name} “{obj}” has been {action}{preview}."),
+      gettext("The {name} “{obj}” has been {action}{preview}."),
       **{
         "name": campaign._meta.verbose_name,
         "obj": campaign,
@@ -807,3 +816,120 @@ def register_admin(site: admin.AdminSite | None = None) -> None:
 
 
 register_admin()
+
+
+class AbstractAdminMeta(ABCMeta, MediaDefiningClass):
+  """Metaclass for CampaignHostAdminMixin to ensure it is abstract."""
+
+  ...
+
+
+class CampaignHostModelAdmin[M: Model](
+  admin.ModelAdmin[M],
+  metaclass=AbstractAdminMeta,
+):
+  """Abstract base class for models that host a Campaign."""
+
+  campaign_field_name = "campaign"
+
+  @abstractmethod
+  def get_campaign_name(self, request: HttpRequest, obj: M) -> str: ...
+
+  @abstractmethod
+  def get_campaign_subject(self, request: HttpRequest, obj: M) -> str: ...
+
+  @abstractmethod
+  def get_campaign_preheader(self, request: HttpRequest, obj: M) -> str: ...
+
+  @abstractmethod
+  def get_campaign_html_content(self, request: HttpRequest, obj: M) -> str: ...
+
+  @abstractmethod
+  def get_campaign_contact_lists(
+    self,
+    request: HttpRequest,
+    obj: M,
+  ) -> QuerySet[ContactList]: ...
+
+  @abstractmethod
+  def get_campaign_send_preview(
+    self,
+    request: HttpRequest,
+    obj: M,
+  ) -> bool: ...
+
+  @abstractmethod
+  def get_campaign_preview_recipients(
+    self,
+    request: HttpRequest,
+    obj: M,
+  ) -> list[str]: ...
+
+  @abstractmethod
+  def get_campaign_preview_message(self, request: HttpRequest, obj: M) -> str: ...
+
+  def get_urls(self) -> list[URLPattern]:
+    urls = super().get_urls() + [
+      path(
+        "<int:pk>/compose-campaign/",
+        self.admin_site.admin_view(self.compose_campaign_view),
+        name="compose-campaign",
+      ),
+    ]
+    return urls
+
+  def compose_campaign_view(self, request: HttpRequest, pk: str) -> HttpResponse:
+    # - On `GET`: Pre-populates form with hook defaults (or existing campaign data if
+    #   one is already attached) and renders template.
+    # - On `POST`: Validates `CampaignComposeForm`, calls `sync_campaign_for_host()`,
+    #   sets Django success message, and redirects back to host change page.
+    # - Add "Create/Edit Email Campaign" button in object tools or change form template
+    #   (`change_form_template`).
+    obj = self.get_object(request, pk)
+    if obj is None:
+      raise Http404(gettext("Object does not exist."))
+
+    if request.method == "POST":
+      form = CampaignComposeForm(request.POST)
+      if form.is_valid():
+        sync_campaign_for_host(obj, form.cleaned_data, self.campaign_field_name)
+
+        self.message_user(
+          request,
+          format_html(
+            gettext('The {name} "{obj}" has been synced with Constant Contact.'),
+            **{
+              "name": self.model._meta.verbose_name,
+              "obj": obj,
+            },
+          ),
+        )
+        return HttpResponse(
+          status=302,
+          headers={
+            "Location": reverse(
+              f"admin:{self.model._meta.app_label}_{self.model._meta.model_name}_change",
+              args=[obj.pk],
+            ),
+          },
+        )
+    elif request.method == "GET":
+      # TODO: Or existing campaign/activity data if one is already attached
+      initial_data = {
+        "name": self.get_campaign_name(request, obj),
+        "subject": self.get_campaign_subject(request, obj),
+        "preheader": self.get_campaign_preheader(request, obj),
+        "html_content": self.get_campaign_html_content(request, obj),
+        "contact_lists": self.get_campaign_contact_lists(request, obj),
+        "send_preview": self.get_campaign_send_preview(request, obj),
+        "preview_message": self.get_campaign_preview_message(request, obj),
+        "preview_recipients": self.get_campaign_preview_recipients(request, obj),
+      }
+      form = CampaignComposeForm(initial=initial_data)
+
+    context = dict(
+      self.admin_site.each_context(request),
+      opts=self.model._meta,
+      object=obj,
+    ) | {"form": form}
+    return TemplateResponse(request, "admin/compose_campaign.html", context)

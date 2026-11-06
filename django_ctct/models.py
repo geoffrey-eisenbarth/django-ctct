@@ -11,15 +11,17 @@ from typing import (
 import jwt
 from django.conf import settings
 from django.core.validators import MaxLengthValidator, validate_email
-from django.db import models
+from django.db import IntegrityError, models
 from django.db.models import Model
 from django.db.models.base import Model as BaseModel
 from django.db.models.fields import NOT_PROVIDED
 from django.utils import formats, timezone
+from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.conf import get_setting
-from django_ctct.managers import (
+from django_ctct.managers import TokenManager
+from django_ctct.remote import (
   CampaignActivityRemoteManager,
   CampaignSummaryRemoteManager,
   ContactListRemoteManager,
@@ -27,7 +29,6 @@ from django_ctct.managers import (
   EmailCampaignRemoteManager,
   RemoteManager,
   Serializer,
-  TokenManager,
   TokenRemoteManager,
 )
 from django_ctct.utils import to_dt
@@ -178,8 +179,7 @@ class SerialModel(Model):
   API_EDITABLE_FIELDS: tuple[str, ...] = tuple()
   API_READONLY_FIELDS: tuple[str, ...] = ("api_id",)
 
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  objects: ClassVar[models.Manager[Self]]
   serializer: ClassVar[Serializer[Self]] = Serializer()
 
   class Meta:
@@ -221,8 +221,8 @@ class CTCTModel(SerialModel):
       field = cls._meta.get_field(field_name)
       assert hasattr(field, "default")
       if field.default is NOT_PROVIDED:  # pragma: no cover
-        raise ValueError(
-          _("Must provide a default value for {model}.{field}.").format(
+        raise IntegrityError(
+          gettext("Must provide a default value for {model}.{field}.").format(
             model=cls.__name__,
             field=field_name,
           )
@@ -242,8 +242,6 @@ class CTCTModel(SerialModel):
 
 
 class CTCTEndpointModel(EndpointMixin, CTCTModel):
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[RemoteManager[Self]] = RemoteManager()
 
   class Meta:
@@ -273,7 +271,6 @@ class ContactList(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()
 
   # API editable fields
@@ -474,7 +471,6 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()
 
   SALUTATIONS = (
@@ -902,7 +898,6 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()
 
   STATUSES = (
@@ -1025,7 +1020,6 @@ class CampaignActivity(CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()
 
   ROLES = (
@@ -1209,7 +1203,6 @@ class CampaignSummary(CTCTEndpointModel):
   )
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()
 
   campaign = models.OneToOneField(
