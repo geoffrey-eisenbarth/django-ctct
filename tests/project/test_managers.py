@@ -289,7 +289,7 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
     )
 
     obj.save()
-    obj = self.model.remote.create(obj)  # type: ignore[misc]
+    obj = self.model.remote.create(obj)
 
     self.assertIsNotNone(obj.api_id)
     self.assertEqual(self.mock_api.call_count, 2)
@@ -312,7 +312,7 @@ class ContactManagerTests(RequestsMockMixin[Contact], TestCase):
     )
 
     with self.assertRaises(HTTPError):
-      self.model.remote.create(obj)  # type: ignore[misc]
+      self.model.remote.create(obj)
 
   def test_update_or_create_unexpected_response_raises(
     self,
@@ -390,7 +390,7 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
       status_code=201,
       json=api_response,
     )
-    res = self.model.remote.create(campaign)  # type: ignore[misc]
+    res = self.model.remote.create(campaign)
     self.assertEqual(res.pk, campaign.pk)
 
   def test_email_campaign_update_requires_api_id(
@@ -499,7 +499,7 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
       status_code=201,
       json=api_response,
     )
-    res = self.model.remote.create(campaign)  # type: ignore[misc]
+    res = self.model.remote.create(campaign)
     self.assertEqual(res.pk, campaign.pk)
     self.assertTrue(campaign.campaign_activities.filter(role="primary_email").exists())
 
@@ -581,7 +581,7 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
     token_decode.return_value = True
     campaign = self.factory.build()
     with self.assertRaises(LocalObjectDoesNotExist):
-      self.model.remote.create(campaign)  # type: ignore[misc]
+      self.model.remote.create(campaign)
 
   def test_email_campaign_create_with_preview_and_permalink_activity(
     self,
@@ -618,5 +618,5 @@ class EmailCampaignAndActivityManagerTests(RequestsMockMixin[EmailCampaign], Tes
       status_code=200,
       json={},
     )
-    res = self.model.remote.create(campaign)  # type: ignore[misc]
+    res = self.model.remote.create(campaign)
     self.assertEqual(res.pk, campaign.pk)

@@ -671,7 +671,7 @@ class EmailCampaignAdmin(RemoteModelAdmin[EmailCampaign]):
       campaign_created = not change
       campaign_updated = change and ("name" in form.changed_data)
       if campaign_created:
-        EmailCampaign.remote.create(campaign)  # type: ignore[misc]
+        EmailCampaign.remote.create(campaign)
       elif campaign_updated:
         EmailCampaign.remote.update(campaign)
 

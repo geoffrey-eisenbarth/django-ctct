@@ -3,7 +3,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from collections import defaultdict
 from collections.abc import Collection
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.core.management.base import BaseCommand
@@ -70,7 +70,7 @@ class Command(BaseCommand):
 
     if model._meta.auto_created and hasattr(model, "contactlist_id"):
       # Delete existing through model instances
-      model.objects.all().delete()  # type: ignore
+      model._default_manager.all().delete()
       update_conflicts = False
       unique_fields = update_fields = None
     elif issubclass(model, ContactCustomField):
@@ -156,7 +156,8 @@ class Command(BaseCommand):
 
     if list_of_tuples := model.remote.all():
       # Split apart so we can save objs to db and get pks
-      objs, per_obj_list_of_related_objs = zip(*list_of_tuples)  # type: ignore[assignment]
+      objs = [obj for obj, _ in list_of_tuples]
+      per_obj_list_of_related_objs = [rel for _, rel in list_of_tuples]
     else:  # pragma: no cover
       return
 
@@ -197,10 +198,11 @@ class Command(BaseCommand):
         # Set related object pk and store in db
         for related_model, objs in list_of_related_objs:
           if issubclass(related_model, CampaignActivity):
-            for obj in cast(list[CampaignActivity], objs):
-              if obj.role == "primary_email":
-                obj.campaign_id = campaign.pk
-                obj.save()
+            for obj in objs:
+              if isinstance(obj, CampaignActivity):
+                if obj.role == "primary_email":
+                  obj.campaign_id = campaign.pk
+                  obj.save()
 
     # Then, fetch CampaignActivity details
     activities = CampaignActivity.objects.filter(

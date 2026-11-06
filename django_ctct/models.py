@@ -20,7 +20,8 @@ from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
 from django_ctct.conf import get_setting
-from django_ctct.managers import (
+from django_ctct.managers import TokenManager
+from django_ctct.remote import (
   CampaignActivityRemoteManager,
   CampaignSummaryRemoteManager,
   ContactListRemoteManager,
@@ -28,7 +29,6 @@ from django_ctct.managers import (
   EmailCampaignRemoteManager,
   RemoteManager,
   Serializer,
-  TokenManager,
   TokenRemoteManager,
 )
 from django_ctct.utils import to_dt
@@ -179,8 +179,7 @@ class SerialModel(Model):
   API_EDITABLE_FIELDS: tuple[str, ...] = tuple()
   API_READONLY_FIELDS: tuple[str, ...] = ("api_id",)
 
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
+  objects: ClassVar[models.Manager[Self]]
   serializer: ClassVar[Serializer[Self]] = Serializer()
 
   class Meta:
@@ -243,8 +242,6 @@ class CTCTModel(SerialModel):
 
 
 class CTCTEndpointModel(EndpointMixin, CTCTModel):
-  # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[RemoteManager[Self]] = RemoteManager()
 
   class Meta:
@@ -274,7 +271,6 @@ class ContactList(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactListRemoteManager] = ContactListRemoteManager()
 
   # API editable fields
@@ -475,7 +471,6 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[ContactRemoteManager] = ContactRemoteManager()
 
   SALUTATIONS = (
@@ -903,7 +898,6 @@ class EmailCampaign(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[EmailCampaignRemoteManager] = EmailCampaignRemoteManager()
 
   STATUSES = (
@@ -1026,7 +1020,6 @@ class CampaignActivity(CTCTEndpointModel):
   }
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[CampaignActivityRemoteManager] = CampaignActivityRemoteManager()
 
   ROLES = (
@@ -1210,7 +1203,6 @@ class CampaignSummary(CTCTEndpointModel):
   )
 
   # Must explicitly specify both
-  objects: ClassVar[models.Manager[Self]] = models.Manager()
   remote: ClassVar[CampaignSummaryRemoteManager] = CampaignSummaryRemoteManager()
 
   campaign = models.OneToOneField(
