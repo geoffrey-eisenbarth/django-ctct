@@ -139,6 +139,9 @@ class ContactCustomFieldFactory(DjangoModelFactory[ContactCustomField]):
 
 
 class ContactWithRelatedObjsFactory(ContactFactory):
+  class Meta:
+    skip_postgeneration_save = True
+
   notes = factory.RelatedFactoryList(
     factory=ContactNoteFactory,
     factory_related_name="contact",
@@ -188,6 +191,7 @@ class EmailCampaignFactory(CTCTModelFactory[EmailCampaign]):
 class CampaignActivityFactory(CTCTModelFactory[CampaignActivity]):
   class Meta:
     model = CampaignActivity
+    skip_postgeneration_save = True
 
   campaign = factory.SubFactory(EmailCampaignFactory)
   subject = factory.Faker("sentence")
@@ -226,6 +230,9 @@ class CampaignSummaryFactory(DjangoModelFactory[CampaignSummary]):
 
 
 class EmailCampaignWithRelatedObjsFactory(EmailCampaignFactory):
+  class Meta:
+    skip_postgeneration_save = True
+
   campaign_activities = factory.RelatedFactoryList(
     factory=CampaignActivityFactory,
     factory_related_name="campaign",

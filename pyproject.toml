@@ -77,6 +77,8 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "project.settings"
+pythonpath = [".", "tests/project"]
+testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
