@@ -206,7 +206,7 @@ class ContactListForm(forms.ModelForm[ContactList]):
     widgets = {
       "description": forms.Textarea,
     }
-    fields = "__all__"
+    fields = ["name", "description", "favorite"]
 
 
 class ContactListAdmin(RemoteModelAdmin[ContactList]):
@@ -574,7 +574,7 @@ class CampaignActivityInlineForm(forms.ModelForm[CampaignActivity]):
 
   class Meta:
     model = CampaignActivity
-    fields = "__all__"
+    fields = "__all__"  # noqa: DJ007
 
 
 class CampaignActivityInline(admin.StackedInline[CampaignActivity, EmailCampaign]):

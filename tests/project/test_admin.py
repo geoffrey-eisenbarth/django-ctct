@@ -6,7 +6,6 @@ from unittest import SkipTest
 from unittest.mock import MagicMock, patch
 
 from django.contrib import admin
-from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
@@ -67,11 +66,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
 
     # Set up client to access admin page
     self.client = Client()
-    self.superuser = User.objects.create_superuser(
-      "admin",
-      "admin@example.com",
-      "password",
-    )
+    self.superuser = UserFactory.create(is_staff=True, is_superuser=True)
     self.client.force_login(self.superuser)
 
   def get_form_data(
@@ -367,11 +362,7 @@ class ModelAdminTest(TestCRUD[E], TestCase):
       self.assertNotIn("list_memberships", readonly_fields)
 
       self.existing_obj.opt_out_source = "ACTION_BY_CONTACT"
-      request.user = User.objects.create_user(
-        username="staff",
-        email="staff@example.com",
-        password="pw",
-      )
+      request.user = UserFactory.create(is_staff=True)
       readonly_fields = model_admin.get_readonly_fields(request, self.existing_obj)
       self.assertIn("list_memberships", readonly_fields)
 
@@ -609,11 +600,7 @@ class ViewModelAdminTest(TestCase):
 
   def setUp(self) -> None:
     self.client = Client()
-    self.user = User.objects.create_user(
-      "user",
-      "user@example.com",
-      "password",
-    )
+    self.user = UserFactory.create()
     self.client.force_login(self.user)
 
     # A couple of objects so the changelist actually renders rows,
@@ -649,11 +636,7 @@ class ViewModelAdminTest(TestCase):
   def test_changelist_view(self) -> None:
     """Superusers can view (read-only) the changelist, rendering all rows."""
 
-    superuser = User.objects.create_superuser(
-      "admin",
-      "admin@example.com",
-      "password",
-    )
+    superuser = UserFactory.create(is_staff=True, is_superuser=True)
     client = Client()
     client.force_login(superuser)
 

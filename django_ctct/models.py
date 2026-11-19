@@ -134,14 +134,6 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
     verbose_name=_("Expires In"),
   )
 
-  @property
-  def expires_at(self) -> dt.datetime:
-    return self.created_at + dt.timedelta(seconds=self.expires_in)
-
-  @property
-  def is_expired(self) -> bool:
-    return timezone.now() >= (self.expires_at - dt.timedelta(seconds=60))
-
   class Meta:
     ordering = ("-created_at",)
 
@@ -152,6 +144,14 @@ class Token(CreatedAtMixin, EndpointMixin, Model):
     )
     s = f"{self.token_type} Token (Expires: {expires_at})"
     return s
+
+  @property
+  def expires_at(self) -> dt.datetime:
+    return self.created_at + dt.timedelta(seconds=self.expires_in)
+
+  @property
+  def is_expired(self) -> bool:
+    return timezone.now() >= (self.expires_at - dt.timedelta(seconds=60))
 
   def decode(self) -> JsonDict:
     """Decode JWT Token, which also verifies that it hasn't expired.
@@ -540,7 +540,7 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     default="implicit",
     verbose_name=_("Permission to Send"),
     help_text=_(
-      "Identifies the type of permission that the Constant Contact account has to send email to the contact"  # noqa: E501
+      "Identifies the permission that the ConstantContact account has to send email"
     ),
   )
   create_source = models.CharField(
@@ -578,14 +578,6 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     verbose_name=_("Opt Out Reason"),
   )
 
-  @property
-  def ctct_source(self) -> dict[str, str]:
-    if self.api_id:
-      source = {"update_source": self.update_source}
-    else:
-      source = {"create_source": self.create_source}
-    return source
-
   class Meta:
     verbose_name = _("Contact")
     verbose_name_plural = _("Contacts")
@@ -599,6 +591,14 @@ class Contact(CreatedAtMixin, UpdatedAtMixin, CTCTEndpointModel):
     self.email = self.email.lower().strip()
     validate_email(self.email)
     return super().clean()
+
+  @property
+  def ctct_source(self) -> dict[str, str]:
+    if self.api_id:
+      source = {"update_source": self.update_source}
+    else:
+      source = {"create_source": self.create_source}
+    return source
 
   @classmethod
   def clean_remote_email(cls, data: JsonDict) -> str:
@@ -1109,19 +1109,6 @@ class CampaignActivity(CTCTEndpointModel):
     verbose_name=_("Format Type"),
   )
 
-  @property
-  def physical_address_in_footer(self) -> dict[str, str] | None:
-    """Returns the company address for email footers.
-
-    Notes
-    -----
-    If you do not include a physical address in the email campaign activity,
-    Constant Contact will use the physical address information saved for the
-    Constant Contact user account.
-
-    """
-    return get_setting("CTCT_PHYSICAL_ADDRESS")
-
   class Meta:
     verbose_name = _("Email Campaign Activity")
     verbose_name_plural = _("Email Campaign Activities")
@@ -1139,6 +1126,10 @@ class CampaignActivity(CTCTEndpointModel):
     except EmailCampaign.DoesNotExist:
       s = super().__str__()
     return s
+
+  def save(self, *args: Any, **kwargs: Any) -> None:
+    self.html_content = self.clean_html_content(self.html_content)
+    super().save(*args, **kwargs)
 
   def serialize(self, data: JsonDict) -> JsonDict:
     if "contact_lists" in data:
@@ -1179,9 +1170,18 @@ class CampaignActivity(CTCTEndpointModel):
       html_content = self.TRACKING_IMAGE + "\n" + html_content
     return html_content
 
-  def save(self, *args: Any, **kwargs: Any) -> None:
-    self.html_content = self.clean_html_content(self.html_content)
-    super().save(*args, **kwargs)
+  @property
+  def physical_address_in_footer(self) -> dict[str, str] | None:
+    """Returns the company address for email footers.
+
+    Notes
+    -----
+    If you do not include a physical address in the email campaign activity,
+    Constant Contact will use the physical address information saved for the
+    Constant Contact user account.
+
+    """
+    return get_setting("CTCT_PHYSICAL_ADDRESS")
 
 
 class CampaignSummary(CTCTEndpointModel):
@@ -1268,6 +1268,19 @@ class CampaignSummary(CTCTEndpointModel):
 
     ordering = ("-campaign",)
 
+  def __str__(self) -> str:
+    try:
+      s = f"{self.campaign} Summary"
+    except EmailCampaign.DoesNotExist:
+      s = super().__str__()
+    return s
+
+  def save(self, *args: Any, **kwargs: Any) -> None:
+    """Must set api_id manually."""
+    if (self.api_id is None) and (self.campaign_id is not None):
+      self.api_id = self.campaign.api_id
+    super().save(*args, **kwargs)
+
   @classmethod
   def clean_remote_counts(cls, field_name: str, data: JsonDict) -> int:
     counts = data.get("unique_counts", {})
@@ -1307,12 +1320,6 @@ class CampaignSummary(CTCTEndpointModel):
   @classmethod
   def clean_remote_not_opened(cls, data: JsonDict) -> int:
     return cls.clean_remote_counts("not_opened", data)
-
-  def save(self, *args: Any, **kwargs: Any) -> None:
-    """Must set api_id manually."""
-    if (self.api_id is None) and (self.campaign_id is not None):
-      self.api_id = self.campaign.api_id
-    super().save(*args, **kwargs)
 
 
 def is_ctct(
