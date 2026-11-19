@@ -1,15 +1,41 @@
+# .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: 'v0.16.7'
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
-  - repo: local
-    hooks:
-      - id: mypy
-        name: mypy
-        entry: uv run mypy
-        language: system
-        types: [python]
-        pass_filenames: false
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0 # Use the latest stable version
+  hooks:
+    - id: check-yaml
+    - id: check-toml
+    - id: end-of-file-fixer
+    - id: trailing-whitespace
+
+- repo: https://github.com/astral-sh/uv-pre-commit
+  rev: 0.13.7 # Matches the uv version used by this project
+  hooks:
+    - id: uv-lock
+
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.17.6 # Matches pyproject.toml's ruff pin
+  hooks:
+    - id: ruff-check
+      args: [--fix]
+    - id: ruff-format
+
+- repo: local
+  hooks:
+    - id: mypy
+      name: mypy
+      entry: uv run --frozen mypy
+      language: system
+      types: [python]
+      pass_filenames: false
+      files: ^django_ctct/.*\.py$
+
+    - id: pytest
+      name: Run Pytest
+      entry: uv run --frozen pytest
+      language: system
+      types: [python]
+      pass_filenames: false
+      files: ^(django_ctct|tests)/.*\.py$
+      args:
+        - "-q"

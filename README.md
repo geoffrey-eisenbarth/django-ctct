@@ -157,13 +157,13 @@ To lint and format:
 
 Once version 0.0.1 is released on PyPI, we hope to implement the following new features (in no particular order):
 
- * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting. 
+ * Background task support using `django-tasks` (which hopefully will merge into Django). This will be controlled by the `CTCT_ENQUEUE_DEFAULT` setting.
  * Add `models.CheckConstraint` and `models.UniqueConstraint` constraints that are currently commented out.
-  
+
 
 I'm always open to new suggestions, so please reach out on GitHub: https://github.com/geoffrey-eisenbarth/django-ctct/
 
- 
+
 ## License
 
 This package is currently distributed under the MIT license.
